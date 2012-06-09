@@ -1,0 +1,27 @@
+# Pongo Makefile
+#
+
+SRCS=containers.c dbmem.c dbtypes.c log.c pmem.c misc.c \
+     json.c mmfile_win.c
+OBJS= $(SRCS:.c=.obj)
+
+CFLAGS=/DWIN32=1 /Zl
+LIBS=-lc -luuid
+INC=-I../include 
+CC=cl
+LD=link
+LIB=lib
+
+.c.obj:
+	$(CC) $(CFLAGS) $(INC) -c $<
+
+pongo.lib: $(OBJS)
+	$(LIB) /nodefaultlib /out:pongo.lib $(OBJS)
+
+all: pongo.lib
+
+depend:
+	$(CC) -E -MM $(INCLUDE) $(ALLSRC) > .depend
+
+clean:
+	del *.obj *.lib

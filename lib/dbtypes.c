@@ -55,7 +55,7 @@ dbtype_t *_string_new(pgctx_t *ctx, dbtag_t type, const char *val, int len)
 
 	if (len == -1) len = strlen(val);
 	if (len < 128) {
-		obj = dbcache_get_str(ctx, type, val);
+		obj = dbcache_get_str(ctx, type, val, len);
 		if (obj) return obj;
 	}
 	obj = dballoc(ctx, sizeof(dbstring_t) + len +1);

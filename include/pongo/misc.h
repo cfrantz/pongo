@@ -50,12 +50,13 @@ static inline uint32_t hash_python(const uint8_t *str)
 	return hash;
 }
 
-static inline uint32_t hash_x31(const uint8_t *str)
+static inline uint32_t hash_x31(const uint8_t *str, int len)
 {
 	uint8_t ch;
 	uint32_t hash = 0;
 
-	while((ch = *str++) != 0) {
+	while(len--) {
+		ch = *str++;
 		hash = (hash*31) + ch;
 	}
 	if (hash == -1UL)

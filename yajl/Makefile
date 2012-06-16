@@ -5,7 +5,7 @@ SRCS= yajl_alloc.c yajl_buf.c yajl.c yajl_encode.c yajl_gen.c \
       yajl_lex.c yajl_parser.c yajl_tree.c yajl_version.c
 OBJS = $(SRCS:.c=.o)
 
-CFLAGS=-g3
+CFLAGS=-O2 -g3
 LIBS=
 INCLUDE=-I../include 
 CC=gcc

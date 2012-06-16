@@ -791,7 +791,7 @@ dbtype_t *dbcache_get_float(pgctx_t *ctx, dbtag_t type, double fval)
     return NULL;
 }
 
-dbtype_t *dbcache_get_str(pgctx_t *ctx, dbtag_t type, const char *sval)
+dbtype_t *dbcache_get_str(pgctx_t *ctx, dbtag_t type, const char *sval, int len)
 {
     int i;
     dbtype_t *cache = ctx->cache;
@@ -803,7 +803,7 @@ dbtype_t *dbcache_get_str(pgctx_t *ctx, dbtag_t type, const char *sval)
     assert(cache->type == Cache);
     _cache = _ptr(ctx, cache->cache);
     
-    hash = hash_x31((const uint8_t*)sval);
+    hash = hash_x31((const uint8_t*)sval, len);
 
     for(i=0; i<_cache->retry; i++, hash=ror32(hash)+1) {
         p = _ptr(ctx, _cache->item[hash % _cache->len]);

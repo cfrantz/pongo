@@ -14,22 +14,22 @@ PongoDB supports the following data types:
 
 Primitive Immutable Types
 -------------------------
-Null
-Boolean
-Integer
-Datetime
-# Uuid -- not supported yet
-Float
-ByteArray
-String
+* Null
+* Boolean
+* Integer
+* Datetime
+* Uuid -- not supported yet
+* Float
+* ByteArray
+* String
 
 -- Perhaps want to add Locking data types so programs can synchronize
    with each other via Pongo: Event, Lock, rwLock.
 
 Mutable Container Types
 -----------------------
-List
-Dictionary
+* List
+* Dictionary
 
 Updates
 =======
@@ -41,22 +41,22 @@ to the datastore without conflicts.
 List Operations
 ===============
 
-List_new()
-List_getitem(list, index)
-List_setitem(list, index, item)
-List_delitem(list, index, item)
-List_append(list, item)
-List_extend(list, iterable)
-List_insert(list, index, item)
-List_remove(list, item)
+* dblist_new()
+* dblist_getitem(list, index)
+* dblist_setitem(list, index, item)
+* dblist_delitem(list, index, item)
+* dblist_append(list, item)
+* dblist_extend(list, iterable)
+* dblist_insert(list, index, item)
+* dblist_remove(list, item)
 
 Dict Operations
 ===============
-Dict_new()
-Dict_getitem(dict, key)
-Dict_setitem(dict, key, value)
-Dict_delitem(dict, key)
-Dict_update(dict, dict_compatible_iterable)
+* dbobject_new()
+* dbobject_getitem(dict, key)
+* dbobject_setitem(dict, key, value)
+* dbobject_delitem(dict, key)
+* dbobject_update(dict, dict_compatible_iterable)
 
 Memory Allocator
 ================

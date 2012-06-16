@@ -73,7 +73,7 @@ extern int dbcache_recache(pgctx_t *ctx, int cachesz, int retry);
 extern dbtype_t *dbcache_put(pgctx_t *ctx, dbtype_t *obj);
 extern dbtype_t *dbcache_get_int(pgctx_t *ctx, dbtag_t type, int64_t ival);
 extern dbtype_t *dbcache_get_float(pgctx_t *ctx, dbtag_t type, double fval);
-extern dbtype_t *dbcache_get_str(pgctx_t *ctx, dbtag_t type, const char *sval);
+extern dbtype_t *dbcache_get_str(pgctx_t *ctx, dbtag_t type, const char *sval, int len);
 extern void dbcache_del(pgctx_t *ctx, dbtype_t *obj);
 
 #endif

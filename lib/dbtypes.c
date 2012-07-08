@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 #ifdef WANT_UUID_TYPE
 #include <uuid/uuid.h>
@@ -277,4 +278,33 @@ int dbeq(dbtype_t *a, dbtype_t *b, int mixed)
 			cmp = 0;
 	}
 	return cmp;
+}
+
+char *dbprint(dbtype_t *t, char *buf, int n)
+{
+	if (t==NULL) {
+		snprintf(buf, n, "null");
+		return buf;
+	}
+	switch(t->type) {
+		case Boolean:
+			snprintf(buf, n, t->bval ? "true" : "false");
+			break;
+		case Int:
+			snprintf(buf, n, "%lld", t->ival);
+			break;
+		case Datetime:
+			snprintf(buf, n, "datetime(%lld)", t->ival);
+			break;
+		case Float:
+			snprintf(buf, n, "%.3f", t->fval);
+			break;
+		case ByteBuffer:
+		case String:
+			snprintf(buf, n, "\"%s\"", t->sval);
+			break;
+		default:
+			snprintf(buf, n, "(type %d)", t->type);
+	}
+	return buf;
 }

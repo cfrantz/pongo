@@ -428,7 +428,7 @@ void pmem_gc_free(memblock_t *base, gcfreecb_t gc_free_cb, void *user)
 				}
 			}
 		}
-		if (bitmark[i]) log_bare("%d %04x %08x", i, page, bitmark[i]);
+		//if (bitmark[i]) log_bare("%d %04x %08x", i, page, bitmark[i]);
 		bitmap[i] &= ~bitmark[i];
 		a |= bitmap[i];
 		if (bitmark[i]) {

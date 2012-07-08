@@ -43,6 +43,7 @@ extern dbtype_t *dbtime_now(pgctx_t *ctx);
 extern uint32_t dbhashval(dbtype_t *aa);
 extern int dbcmp(dbtype_t *aa, dbtype_t *bb);
 extern int dbeq(dbtype_t *aa, dbtype_t *bb, int mixed);
+extern char *dbprint(dbtype_t *a, char *buf, int n);
 
 // In containers.c
 extern dbtype_t *dblist_new(pgctx_t *ctx);

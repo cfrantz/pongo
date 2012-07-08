@@ -367,11 +367,13 @@ PongoList_length(PongoList *self)
 {
     dbtype_t *db;
     _list_t *list;
+    int len;
     dblock(self->ctx);
     db = _ptr(self->ctx, self->dblist);
     list = _ptr(self->ctx, db->list);
+    len = list->len;
     dbunlock(self->ctx);
-    return list->len;
+    return len;
 }
 
 static int
@@ -604,10 +606,15 @@ PongoDict_get(PongoDict *self, PyObject *args, PyObject *kwargs)
                 &key, &dflt, &sep))
         return NULL;
 
-    klist = PyObject_CallMethod(key, "split", "s", sep);
     dblock(self->ctx);
-    k = from_python(self->ctx, klist);
-    Py_XDECREF(klist);
+    if (PyString_Check(key) || PyUnicode_Check(key)) {
+        klist = PyObject_CallMethod(key, "split", "s", sep);
+        k = from_python(self->ctx, klist);
+        Py_XDECREF(klist);
+    } else {
+        k = from_python(self->ctx, key);
+    }
+
     if (!PyErr_Occurred()) {
         if (k->type == List) {
             r = dbobject_multi(SELF_CTX_AND_DBOBJ, k, multi_GET, &v, 0);
@@ -653,10 +660,14 @@ PongoDict_set(PongoDict *self, PyObject *args, PyObject *kwargs)
                 &key, &value, &sep))
         return NULL;
 
-    klist = PyObject_CallMethod(key, "split", "s", sep);
-
     dblock(self->ctx);
-    k = from_python(self->ctx, klist);
+    if (PyString_Check(key) || PyUnicode_Check(key)) {
+        klist = PyObject_CallMethod(key, "split", "s", sep);
+        k = from_python(self->ctx, klist);
+        Py_XDECREF(klist);
+    } else {
+        k = from_python(self->ctx, key);
+    }
     v = from_python(self->ctx, value);
     Py_XDECREF(klist);
     if (!PyErr_Occurred()) {

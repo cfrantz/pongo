@@ -293,34 +293,21 @@ PongoList_SetItem(PongoList *self, Py_ssize_t i, PyObject *v)
 }
 
 static PyObject *
-PongoList_append(PongoList *self, PyObject *v)
+PongoList_append(PongoList *self, PyObject *args, PyObject *kwargs)
 {
     PyObject *ret = NULL;
-    dbtype_t *item;
-
-    dblock(self->ctx);
-    item = from_python(self->ctx, v);
-    if (!PyErr_Occurred() && dblist_append(SELF_CTX_AND_DBLIST, item, SYNC) == 0) {
-        ret = Py_None;
-    }
-    dbunlock(self->ctx);
-    return ret;
-}
-
-static PyObject *
-PongoList_insert(PongoList *self, PyObject *args)
-{
-    Py_ssize_t i;
     PyObject *v;
-    PyObject *ret = NULL;
+    int sync = SYNC;
+    char *kwlist[] = {"value", "sync", NULL};
     dbtype_t *item;
 
-    if (!PyArg_ParseTuple(args, "nO:insert", &i, &v))
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|i:append", kwlist,
+                &v, &sync))
         return NULL;
 
     dblock(self->ctx);
     item = from_python(self->ctx, v);
-    if (!PyErr_Occurred() && dblist_insert(SELF_CTX_AND_DBLIST, i, item, SYNC) == 0) {
+    if (!PyErr_Occurred() && dblist_append(SELF_CTX_AND_DBLIST, item, sync) == 0) {
         ret = Py_None;
     }
     dbunlock(self->ctx);
@@ -328,14 +315,43 @@ PongoList_insert(PongoList *self, PyObject *args)
 }
 
 static PyObject *
-PongoList_remove(PongoList *self, PyObject *v)
+PongoList_insert(PongoList *self, PyObject *args, PyObject *kwargs)
 {
+    Py_ssize_t i;
+    PyObject *v;
+    int sync = SYNC;
     PyObject *ret = NULL;
     dbtype_t *item;
+    char *kwlist[] = {"value", "sync", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "nO|i:insert", kwlist,
+                &i, &v, &sync))
+        return NULL;
 
     dblock(self->ctx);
     item = from_python(self->ctx, v);
-    if (!PyErr_Occurred() && dblist_remove(SELF_CTX_AND_DBLIST, item, SYNC) == 0) {
+    if (!PyErr_Occurred() && dblist_insert(SELF_CTX_AND_DBLIST, i, item, sync) == 0) {
+        ret = Py_None;
+    }
+    dbunlock(self->ctx);
+    return ret;
+}
+
+static PyObject *
+PongoList_remove(PongoList *self, PyObject *args, PyObject *kwargs)
+{
+    PyObject *ret = NULL;
+    dbtype_t *item;
+    PyObject *v;
+    int sync = SYNC;
+    char *kwlist[] = {"value", "sync", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|i:remove", kwlist,
+                &v, &sync))
+        return NULL;
+    dblock(self->ctx);
+    item = from_python(self->ctx, v);
+    if (!PyErr_Occurred() && dblist_remove(SELF_CTX_AND_DBLIST, item, sync) == 0) {
         ret = Py_None; Py_INCREF(ret);
     }
     dbunlock(self->ctx);
@@ -343,17 +359,20 @@ PongoList_remove(PongoList *self, PyObject *v)
 }
 
 static PyObject *
-PongoList_pop(PongoList *self, PyObject *args)
+PongoList_pop(PongoList *self, PyObject *args, PyObject *kwargs)
 {
     Py_ssize_t i = -1;
     dbtype_t *item;
     PyObject *ret = NULL;
+    int sync = SYNC;
+    char *kwlist[] = {"n", "sync", NULL};
 
-    if (!PyArg_ParseTuple(args, "|n:pop", &i))
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|ni:pop", kwlist,
+                &i, &sync))
         return NULL;
 
     dblock(self->ctx);
-    if (dblist_delitem(SELF_CTX_AND_DBLIST, i, &item, SYNC) == 0) {
+    if (dblist_delitem(SELF_CTX_AND_DBLIST, i, &item, sync) == 0) {
         ret = to_python(self->ctx, item, 1);
     } else {
         PyErr_SetString(PyExc_Exception, "PongoList corrupted");
@@ -419,11 +438,18 @@ PongoList_repr(PyObject *ob)
     return PyString_FromFormat("PongoList(%p, %s)", self->ctx, buf);
 }
 
+void PongoList_Del(PyObject *ob)
+{
+    PongoList *self = (PongoList*)ob;
+    printf("PongoList_Del %p %08llx\n", self, self->dblist);
+    PyObject_Del(ob);
+}
+
 static PyMethodDef pydblist_methods[] = {
-    { "append", (PyCFunction)PongoList_append,       METH_O, NULL },
-    { "insert", (PyCFunction)PongoList_insert,       METH_VARARGS, NULL },
-    { "remove", (PyCFunction)PongoList_remove,       METH_O, NULL },
-    { "pop",    (PyCFunction)PongoList_pop,          METH_VARARGS, NULL },
+    { "append", (PyCFunction)PongoList_append,       METH_VARARGS|METH_KEYWORDS, NULL },
+    { "insert", (PyCFunction)PongoList_insert,       METH_VARARGS|METH_KEYWORDS, NULL },
+    { "remove", (PyCFunction)PongoList_remove,       METH_VARARGS|METH_KEYWORDS, NULL },
+    { "pop",    (PyCFunction)PongoList_pop,          METH_VARARGS|METH_KEYWORDS, NULL },
     { "native", (PyCFunction)PongoList_native,       METH_NOARGS, NULL },
     { NULL, NULL }
 };
@@ -447,7 +473,7 @@ static PyTypeObject PongoList_Type = {
     "_pongo.PongoList",         /*tp_name*/
     sizeof(PongoList), /*tp_basicsize*/
     0,                         /*tp_itemsize*/
-    (destructor)PyObject_Del,  /*tp_dealloc*/
+    (destructor)PongoList_Del,  /*tp_dealloc*/
     0,                         /*tp_print*/
     0,                         /*tp_getattr*/
     0,                         /*tp_setattr*/
@@ -653,11 +679,12 @@ PongoDict_set(PongoDict *self, PyObject *args, PyObject *kwargs)
     PyObject *klist = NULL;
     PyObject *ret = NULL;
     dbtype_t *k, *v;
-    char *kwlist[] = {"key", "value", "sep", NULL};
+    int sync = SYNC;
+    char *kwlist[] = {"key", "value", "sep", "sync", NULL};
     char *sep = ".";
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|s:set", kwlist,
-                &key, &value, &sep))
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|si:set", kwlist,
+                &key, &value, &sep, &sync))
         return NULL;
 
     dblock(self->ctx);
@@ -672,12 +699,12 @@ PongoDict_set(PongoDict *self, PyObject *args, PyObject *kwargs)
     Py_XDECREF(klist);
     if (!PyErr_Occurred()) {
         if (k->type == List) {
-            if (dbobject_multi(SELF_CTX_AND_DBOBJ, k, multi_SET, &v, SYNC) == 0) {
+            if (dbobject_multi(SELF_CTX_AND_DBOBJ, k, multi_SET, &v, sync) == 0) {
                 ret = Py_None;
             } else {
                 PyErr_SetObject(PyExc_KeyError, key);
             }
-        } else if (dbobject_setitem(SELF_CTX_AND_DBOBJ, k, v, SYNC) == 0) {
+        } else if (dbobject_setitem(SELF_CTX_AND_DBOBJ, k, v, sync) == 0) {
             ret = Py_None;
         } else {
             PyErr_SetObject(PyExc_KeyError, key);
@@ -689,13 +716,16 @@ PongoDict_set(PongoDict *self, PyObject *args, PyObject *kwargs)
 }
 
 static PyObject *
-PongoDict_pop(PongoDict *self, PyObject *args)
+PongoDict_pop(PongoDict *self, PyObject *args, PyObject *kwargs)
 {
     PyObject *key, *dflt = NULL;
     PyObject *ret = NULL;
     dbtype_t *k, *v;
+    int sync = SYNC;
+    char *kwlist[] = {"key", "default", "sync", NULL};
 
-    if (!PyArg_ParseTuple(args, "O|O:pop", &key, &dflt))
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|Oi:pop", kwlist,
+                &key, &dflt, &sync))
         return NULL;
 
     dblock(self->ctx);
@@ -931,6 +961,13 @@ PongoDict_repr(PyObject *ob)
     return PyString_FromFormat("PongoDict(%p, %s)", self->ctx, buf);
 }
 
+void PongoDict_Del(PyObject *ob)
+{
+    PongoDict *self = (PongoDict*)ob;
+    printf("PongoDict_Del %p %08llx\n", self, self->dbobj);
+    PyObject_Del(ob);
+}
+
 static PyMappingMethods pydbdict_as_mapping = {
     (lenfunc)PongoDict_length,           /* mp_length */
     (binaryfunc)PongoDict_GetItem,       /* mp_subscript */
@@ -953,7 +990,7 @@ static PySequenceMethods pydbdict_as_sequence = {
 static PyMethodDef pydbdict_methods[] = {
     {"get",     (PyCFunction)PongoDict_get,          METH_VARARGS|METH_KEYWORDS, NULL },
     {"set",     (PyCFunction)PongoDict_set,          METH_VARARGS|METH_KEYWORDS, NULL },
-    {"pop",     (PyCFunction)PongoDict_pop,          METH_VARARGS, NULL },
+    {"pop",     (PyCFunction)PongoDict_pop,          METH_VARARGS|METH_KEYWORDS, NULL },
     {"keys",    (PyCFunction)PongoDict_keys,         METH_NOARGS, NULL },
     {"values",  (PyCFunction)PongoDict_values,       METH_NOARGS, NULL },
     {"items",   (PyCFunction)PongoDict_items,        METH_NOARGS, NULL },
@@ -970,7 +1007,7 @@ static PyTypeObject PongoDict_Type = {
     "_pongo.PongoDict",         /*tp_name*/
     sizeof(PongoDict), /*tp_basicsize*/
     0,                         /*tp_itemsize*/
-    (destructor)PyObject_Del,  /*tp_dealloc*/
+    (destructor)PongoDict_Del,  /*tp_dealloc*/
     0,                         /*tp_print*/
     0,                         /*tp_getattr*/
     0,                         /*tp_setattr*/

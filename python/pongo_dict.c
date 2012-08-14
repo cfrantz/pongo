@@ -32,7 +32,6 @@ PongoDict_GetItem(PongoDict *self, PyObject *key)
         if (dbobject_getitem(SELF_CTX_AND_DBOBJ, k, &v) == 0) {
             ret = to_python(self->ctx, v, 1);
         } else {
-            dbfree(self->ctx, k);
             PyErr_SetObject(PyExc_KeyError, key);
         }
     }
@@ -96,7 +95,7 @@ PongoDict_contains(PongoDict *self, PyObject *key)
 static PyObject *
 PongoDict_get(PongoDict *self, PyObject *args, PyObject *kwargs)
 {
-    PyObject *key, *dflt = NULL;
+    PyObject *key, *dflt = Py_None;
     PyObject *klist = NULL;
     PyObject *ret = NULL;
     dbtype_t *k, *v;
@@ -410,31 +409,6 @@ PongoDict_search(PongoDict *self, PyObject *args)
 }
 
 static PyObject *
-PongoDict_stats(PongoDict *self)
-{
-    dbtype_t *db;
-    _obj_t *obj;
-    PyObject *ret = NULL;
-    uint32_t hash;
-    int i, len, misplaced;
-
-    dblock(self->ctx);
-    db = _ptr(self->ctx, self->dbobj);
-    obj = _ptr(self->ctx, db->obj);
-    misplaced = len = 0;
-    for(i=0; i<obj->len; i++) {
-        if (obj->item[i].key) {
-            len++;
-            hash = dbhashval(_ptr(self->ctx, obj->item[i].key));
-            if (hash % obj->len != i)
-                misplaced++;
-        }
-    }
-    ret = Py_BuildValue("(iii)", obj->len, len, misplaced);
-    dbunlock(self->ctx);
-    return ret;
-}
-static PyObject *
 PongoDict_repr(PyObject *ob)
 {
     PongoDict *self = (PongoDict*)ob;
@@ -480,7 +454,6 @@ static PyMethodDef pydbdict_methods[] = {
     {"native",  (PyCFunction)PongoDict_native,       METH_NOARGS, NULL },
     {"json",    (PyCFunction)PongoDict_json,         METH_VARARGS, NULL },
     {"search",  (PyCFunction)PongoDict_search,       METH_VARARGS, NULL },
-    {"stats",   (PyCFunction)PongoDict_stats,        METH_NOARGS, NULL },
     { NULL, NULL },
 };
 

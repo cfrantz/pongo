@@ -187,6 +187,7 @@ int dbcmp(pgctx_t *ctx, dbtype_t *a, dbtype_t *b)
 	_obj_t *ao, *bo;
 	dbtype_t *aa, *bb;
 	double diff;
+	int64_t diff64;
 
 	if (a == b) return 0;
 	if (!a && b) return -1;
@@ -219,9 +220,10 @@ int dbcmp(pgctx_t *ctx, dbtype_t *a, dbtype_t *b)
 		case Boolean:
 		case Int:
 		case Datetime:
-			cmp = a->ival - b->ival;
-			if (cmp < 0) { cmp = -1; }
-			else if (cmp > 0) { cmp = 1; }
+			diff64 = a->ival - b->ival;
+			if (diff64 < 0) { cmp = -1; }
+			else if (diff64 > 0) { cmp = 1; }
+			else { cmp = 0; }
 			break;
 		case Float:
 			diff = a->fval - b->fval;
@@ -283,6 +285,7 @@ int dbcmp_primitive(dbtype_t *a, dbtag_t btype, const void *b)
 {
 	int cmp;
 	double diff;
+	int64_t diff64;
 
 	if (a==NULL && b==NULL) return 0;
 	if (!a && b) return -1;
@@ -293,9 +296,10 @@ int dbcmp_primitive(dbtype_t *a, dbtag_t btype, const void *b)
 		case Boolean:
 		case Int:
 		case Datetime:
-			cmp = a->ival - *(int64_t*)b;
-			if (cmp < 0) { cmp = -1; }
-			else if (cmp > 0) { cmp = 1; }
+			diff64 = a->ival - *(int64_t*)b;
+			if (diff64 < 0) { cmp = -1; }
+			else if (diff64 > 0) { cmp = 1; }
+			else { cmp = 0; }
 			break;
 		case Float:
 			diff = a->fval - *(double*)b;

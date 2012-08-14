@@ -26,8 +26,11 @@ PongoList_GetItem(PongoList *self, Py_ssize_t i)
     PyObject *ret = NULL;
 
     dblock(self->ctx);
-    if (dblist_getitem(SELF_CTX_AND_DBLIST, i, &item) == 0)
+    if (i>=0 && dblist_getitem(SELF_CTX_AND_DBLIST, i, &item) == 0) {
         ret = to_python(self->ctx, item, 1);
+    } else {
+        PyErr_SetString(PyExc_IndexError, "list index out of range");
+    }
     dbunlock(self->ctx);
 
     return ret;
@@ -40,15 +43,19 @@ PongoList_SetItem(PongoList *self, Py_ssize_t i, PyObject *v)
     int ret = -1;
 
     dblock(self->ctx);
-    if (v == NULL) {
-        ret = dblist_delitem(SELF_CTX_AND_DBLIST, i, &item, SYNC);
-    } else {
-        item = from_python(self->ctx, v);
-        if (!PyErr_Occurred() && dblist_setitem(SELF_CTX_AND_DBLIST, i, item, SYNC) == 0) {
-            ret = 0;
+    if (i>=0) {
+        if (v == NULL) {
+            ret = dblist_delitem(SELF_CTX_AND_DBLIST, i, &item, SYNC);
+        } else {
+            item = from_python(self->ctx, v);
+            if (!PyErr_Occurred() && dblist_setitem(SELF_CTX_AND_DBLIST, i, item, SYNC) == 0) {
+                ret = 0;
+            }
         }
     }
     dbunlock(self->ctx);
+    if (ret < 0)
+        PyErr_SetString(PyExc_IndexError, "list index out of range");
     return ret;
 }
 
@@ -90,8 +97,12 @@ PongoList_insert(PongoList *self, PyObject *args, PyObject *kwargs)
 
     dblock(self->ctx);
     item = from_python(self->ctx, v);
-    if (!PyErr_Occurred() && dblist_insert(SELF_CTX_AND_DBLIST, i, item, sync) == 0) {
-        ret = Py_None;
+    if (!PyErr_Occurred()) {
+        if (dblist_insert(SELF_CTX_AND_DBLIST, i, item, sync) == 0) {
+            ret = Py_None; Py_INCREF(ret);
+        } else {
+            PyErr_SetString(PyExc_IndexError, "list index out of range");
+        }
     }
     dbunlock(self->ctx);
     return ret;
@@ -111,8 +122,12 @@ PongoList_remove(PongoList *self, PyObject *args, PyObject *kwargs)
         return NULL;
     dblock(self->ctx);
     item = from_python(self->ctx, v);
-    if (!PyErr_Occurred() && dblist_remove(SELF_CTX_AND_DBLIST, item, sync) == 0) {
-        ret = Py_None; Py_INCREF(ret);
+    if (!PyErr_Occurred()) {
+        if (dblist_remove(SELF_CTX_AND_DBLIST, item, sync) == 0) {
+            ret = Py_None; Py_INCREF(ret);
+        } else {
+            PyErr_SetString(PyExc_ValueError, "item not in list");
+        }
     }
     dbunlock(self->ctx);
     return ret;
@@ -135,7 +150,7 @@ PongoList_pop(PongoList *self, PyObject *args, PyObject *kwargs)
     if (dblist_delitem(SELF_CTX_AND_DBLIST, i, &item, sync) == 0) {
         ret = to_python(self->ctx, item, 1);
     } else {
-        PyErr_SetString(PyExc_Exception, "PongoList corrupted");
+        PyErr_SetString(PyExc_IndexError, "list index out of range");
     }
     dbunlock(self->ctx);
     return ret;
@@ -260,3 +275,5 @@ PyTypeObject PongoList_Type = {
     0,                         /* tp_alloc */
     0,                         /* tp_new */
 };
+
+// vim: ts=4 sts=4 sw=4 expandtab:

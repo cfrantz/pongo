@@ -16,8 +16,12 @@ int64_t utime_now(void)
     now = tm.tv_sec * 1000000LL + tm.tv_nsec/1000;
     return now;
 }
-
 #else
+int getpid(void)
+{
+    return (int)GetCurrentProcessId();
+}
+
 int64_t utime_now(void)
 {
     int64_t now;

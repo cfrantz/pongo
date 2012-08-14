@@ -5,6 +5,7 @@
 #endif
 #include <pongo/dbmem.h>
 #include <pongo/dbtypes.h>
+#include <pongo/bonsai.h>
 #include <pongo/log.h>
 #include <pongo/misc.h>
 
@@ -88,6 +89,7 @@ dbtype_t *dbstring_new(pgctx_t *ctx, const char *val, int len)
 }
 
 #ifdef WANT_UUID_TYPE
+// FIXME: store uuids in cache?
 dbtype_t *dbuuid_new(pgctx_t *ctx, uint8_t *val)
 {
 	dbtype_t *obj = dballoc(ctx, sizeof(dbuuid_t));
@@ -97,7 +99,7 @@ dbtype_t *dbuuid_new(pgctx_t *ctx, uint8_t *val)
 	} else {
 		uuid_generate_time(obj->uuval);
 	}
-	return cache_put(ctx, obj);
+	return obj;
 }
 
 dbtype_t *dbuuid_new_fromstring(pgctx_t *ctx, const char *val)
@@ -105,10 +107,9 @@ dbtype_t *dbuuid_new_fromstring(pgctx_t *ctx, const char *val)
 	dbtype_t *obj = dballoc(ctx, sizeof(dbuuid_t));
 	obj->type = Uuid;
 	if (uuid_parse(val, obj->uuval) < 0) {
-		dbfree(ctx, obj);
 		obj = NULL;
 	}
-	return cache_put(ctx, obj);
+	return obj;
 }
 #endif
 
@@ -171,14 +172,36 @@ uint32_t dbhashval(dbtype_t *a)
 }
 
 // Relational compare (lt, eq, gt)
-int dbcmp(dbtype_t *a, dbtype_t *b)
+// NULL is less than all other values
+// If types are different, then the "lesser" value is the one with the
+// lower type field.  This works out to (Null, Boolean, Int, Datetime, Float,
+// Uuid, ByteBuffer, String, List, Object).
+// Lists and Objects are compared like strcmp.  Each element is
+// examined, key, then value.  If 2 lists/objects are otherwise equal, then
+// the shorter one is "less" than the longer one.
+int dbcmp(pgctx_t *ctx, dbtype_t *a, dbtype_t *b)
 {
 	int cmp = 0;
+	int i, len, alen, blen;
+	_list_t *al, *bl;
+	_obj_t *ao, *bo;
+	dbtype_t *aa, *bb;
 	double diff;
 
 	if (a == b) return 0;
-	if (!(a && b)) return -2;
+	if (!a && b) return -1;
+	if (a && !b) return 1;
 	if (a->type != b->type) {
+		if ((a->type == ByteBuffer && b->type == String) ||
+		    (a->type == String && b->type == ByteBuffer)) {
+			// Nothing
+		} else {
+			return a->type - b->type;
+		}
+
+		/*
+		 * Not sure if I want mixed type compare among numbers
+		 *
 		if ((a->type == Int && b->type == Float)) {
 			diff = a->ival - b->fval;
 			if (diff < 0.0) { cmp = -1; }
@@ -190,7 +213,7 @@ int dbcmp(dbtype_t *a, dbtype_t *b)
 			else if (diff > 0.0) { cmp = 1; }
 			return cmp;
 		}
-		return -2;
+		*/
 	}
 	switch(a->type) {
 		case Boolean:
@@ -204,21 +227,50 @@ int dbcmp(dbtype_t *a, dbtype_t *b)
 			diff = a->fval - b->fval;
 			if (diff < 0.0) { cmp = -1; }
 			else if (diff > 0.0) { cmp = 1; }
+			else { cmp = 0; }
+			break;
+		case Uuid:
+			cmp = memcmp(a->uuval, b->uuval, 16);
 			break;
 		case ByteBuffer:
 		case String:
 			cmp = strcmp((char*)a->sval, (char*)b->sval);
 			break;
-		case Uuid:
-			cmp = memcmp(a->uuval, b->uuval, 16);
-			break;
 		case List:
+			al = _ptr(ctx, a->list); alen = al->len;
+			bl = _ptr(ctx, b->list); blen = bl->len;
+			len = (alen < blen) ? alen : blen;
+			for(i=0; i<len; i++) {
+				cmp = dbcmp(ctx, _ptr(ctx, al->item[i]), _ptr(ctx, bl->item[i]));
+				if (cmp) return cmp;
+			}
+			cmp = alen-blen;
+			break;
 		case Object:
-		case _InternalList:
-		case _InternalObj:
-			// Currently "cmp" has no meaning for
-			// containers
-			cmp = -2;
+			ao = _ptr(ctx, a->obj); alen = ao->len;
+			bo = _ptr(ctx, b->obj); blen = bo->len;
+			len = (alen < blen) ? alen : blen;
+			for(i=0; i<len; i++) {
+				cmp = dbcmp(ctx, _ptr(ctx, ao->item[i].key), _ptr(ctx, bo->item[i].key));
+				if (cmp) return cmp;
+				cmp = dbcmp(ctx, _ptr(ctx, ao->item[i].value), _ptr(ctx, bo->item[i].value));
+				if (cmp) return cmp;
+			}
+			cmp = alen-blen;
+			break;
+		case Collection:
+			a = _ptr(ctx, a->obj); alen = bonsai_size(a);
+			b = _ptr(ctx, b->obj); blen = bonsai_size(b);
+			len = (alen < blen) ? alen : blen;
+			for(i=0; i<len; i++) {
+				aa = bonsai_index(ctx, a, i);
+				bb = bonsai_index(ctx, b, i);
+				cmp = dbcmp(ctx, _ptr(ctx, aa->key), _ptr(ctx, bb->key));
+				if (cmp) return cmp;
+				cmp = dbcmp(ctx, _ptr(ctx, aa->value), _ptr(ctx, bb->value));
+				if (cmp) return cmp;
+			}
+			cmp = alen - blen;
 			break;
 		default:
 			log_error("Comparing unknown object types: %d", a->type);
@@ -227,58 +279,42 @@ int dbcmp(dbtype_t *a, dbtype_t *b)
 	return cmp;
 }
 
-// Simple value equality
-int dbeq(dbtype_t *a, dbtype_t *b, int mixed)
+int dbcmp_primitive(dbtype_t *a, dbtag_t btype, const void *b)
 {
-	int cmp = 0;
+	int cmp;
+	double diff;
 
-	// If they're both NULL they're equal.
-	if (a == b) return 1;
-	// If only one is NULL, they're not equal
-	if (a==NULL || b==NULL) return 0;
+	if (a==NULL && b==NULL) return 0;
+	if (!a && b) return -1;
+	if (a && !b) return 1;
+	if (a->type != btype) return a->type - btype;
 
-	if ((a->type == ByteBuffer && b->type == String) ||
-	    (b->type == ByteBuffer && a->type == String)) {
-		// do nothing and fall into the switch below
-	} else if (mixed && a->type != b->type) {
-		if ((a->type == Int && b->type == Float)) {
-			return a->ival == b->fval;
-		} else if ((a->type == Float && b->type == Int)) {
-			return a->fval == b->ival;
-		}
-		return 0;
-	}
 	switch(a->type) {
 		case Boolean:
 		case Int:
 		case Datetime:
-			cmp = a->ival == b->ival;
+			cmp = a->ival - *(int64_t*)b;
+			if (cmp < 0) { cmp = -1; }
+			else if (cmp > 0) { cmp = 1; }
 			break;
 		case Float:
-			cmp = a->fval == b->fval;
+			diff = a->fval - *(double*)b;
+			if (diff < 0.0) { cmp = -1; }
+			else if (diff > 0.0) { cmp = 1; }
+			else { cmp = 0; }
 			break;
 		case ByteBuffer:
 		case String:
-			if (a->hash == b->hash)
-				cmp = !strcmp((char*)a->sval, (char*)b->sval);
-			break;
-		case Uuid:
-			cmp = !memcmp(a->uuval, b->uuval, 16);
-			break;
-		case List:
-		case Object:
-		case _InternalList:
-		case _InternalObj:
-			// Currently "eq" has no meaning for
-			// containers
-			cmp = 0;
+			cmp = strcmp((char*)a->sval, (const char*)b);
 			break;
 		default:
 			log_error("Comparing unknown object types: %d", a->type);
-			cmp = 0;
+			cmp = -2;
+
 	}
 	return cmp;
 }
+
 
 char *dbprint(dbtype_t *t, char *buf, int n)
 {
@@ -300,8 +336,10 @@ char *dbprint(dbtype_t *t, char *buf, int n)
 			snprintf(buf, n, "%.3f", t->fval);
 			break;
 		case ByteBuffer:
-		case String:
 			snprintf(buf, n, "\"%s\"", t->sval);
+			break;
+		case String:
+			snprintf(buf, n, "u\"%s\"", t->sval);
 			break;
 		default:
 			snprintf(buf, n, "(type %d)", t->type);

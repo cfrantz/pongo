@@ -2,6 +2,9 @@
 #define PONGO_MISC_H
 
 #include <time.h>
+#ifndef WIN32
+#include <unistd.h>
+#endif
 #include <pongo/stdtypes.h>
 
 static inline uint32_t ror32(uint32_t x)
@@ -67,4 +70,8 @@ static inline uint32_t hash_x31(const uint8_t *str, int len)
 extern int64_t utime_now(void);
 extern time_t mktimegm(struct tm *tm);
 extern int is_prime(uint32_t n);
+
+#ifdef WIN32
+extern int getpid(void);
+#endif
 #endif

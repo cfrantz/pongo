@@ -10,6 +10,7 @@
 
 #include <pongo/dbmem.h>
 #include <pongo/dbtypes.h>
+#include <pongo/pidcache.h>
 #include <pongo/pmem.h>
 #include <pongo/misc.h>
 #include <pongo/log.h>
@@ -17,8 +18,7 @@
 #undef SCANNING_GC
 #define MARKING_GC 1
 
-#define NR_CONTEXT 16
-pgctx_t *dbctx[NR_CONTEXT];
+pgctx_t *dbctx[NR_DB_CONTEXT];
 
 #define _dblockop(ctx, op, lock) \
 	mm_lock(&(ctx)->mm, (op), \
@@ -27,7 +27,7 @@ pgctx_t *dbctx[NR_CONTEXT];
 pgctx_t *dbfindctx(const char *filename)
 {
 	int i;
-	for(i=0; i<NR_CONTEXT; i++) {
+	for(i=0; i<NR_DB_CONTEXT; i++) {
 		if (!strcmp(filename, dbctx[i]->mm.filename))
 			return dbctx[i];
 	}
@@ -77,6 +77,13 @@ void dbmem_info(pgctx_t *ctx)
 		pmem_info(ctx->mb[i]);
 }
 
+#ifdef WANT_UUID_TYPE
+dbtype_t *_newkey(pgctx_t *ctx, dbtype_t *value)
+{
+	return dbuuid_new(ctx, NULL);
+}
+#endif
+
 pgctx_t *dbfile_open(const char *filename, uint32_t initsize)
 {
 	int ret, i;
@@ -91,13 +98,17 @@ pgctx_t *dbfile_open(const char *filename, uint32_t initsize)
 	// Create a new context
 	ctx = malloc(sizeof(*ctx));
 	memset(ctx, 0, sizeof(*ctx));
-	for(i=0; i<NR_CONTEXT; i++) {
+	for(i=0; i<NR_DB_CONTEXT; i++) {
 		if (dbctx[i] == NULL) {
 			dbctx[i] = ctx;
+			break;
 		}
 	}
 	ret = mm_open(&ctx->mm, filename, initsize);
 	ctx->root = ctx->mm.map[0].ptr;
+#ifdef WANT_UUID_TYPE
+	ctx->newkey = _newkey;
+#endif
 
 	if (strcmp((char*)ctx->root->signature, DBROOT_SIG)) {
 		r = ctx->root;
@@ -108,17 +119,17 @@ pgctx_t *dbfile_open(const char *filename, uint32_t initsize)
 		r->pg_count = initsize / 4096;
 		strcpy((char*)r->signature, DBROOT_SIG);
 
-		// Create the meta dictionary for holding config items
-		ctx->meta = dbobject_new(ctx);
-		r->meta = _offset(ctx, ctx->meta);
-
 		// Create the root data dictionary
-		ctx->data = dbobject_new(ctx);
+		ctx->data = dbcollection_new(ctx);
 		r->data = _offset(ctx, ctx->data);
 
 		// Not sure about the atom cache...
+		ctx->cache = NULL;
 		ctx->cache = dbcache_new(ctx, 0, 0);
 		r->cache = _offset(ctx, ctx->cache);
+
+		ctx->pidcache = NULL;
+		r->pidcache = _offset(ctx, dbcollection_new(ctx));
 		
 		// Create const true/false objects
 		c = dballoc(ctx, 16);
@@ -129,23 +140,8 @@ pgctx_t *dbfile_open(const char *filename, uint32_t initsize)
 		c->type = Boolean; c->bval = 1;
 		r->booleans[1] = _offset(ctx, c);
 
-#if 0
-		// Create a pool of small integers -5 to 255 inclusive
-		c = dballoc(ctx, 16);
-		c->type = Int; c->ival = -5;
-		r->integers = _offset(ctx, c);
-		for(i=-4, oc=c; i<256; i++, oc=c) {
-			c = dballoc(ctx, 16);
-			// The allocations are supposed to be 16 bytes
-			// apart. We'll lose track of the constant
-			// integers if they aren't.
-			assert((uint8_t*)c - (uint8_t*)oc == 16);
-			c->type = Int; c->ival = i;
-		}
-#endif
-		dbobject_setitem(ctx, ctx->meta,
-				dbstring_new(ctx, "chunksize", -1),
-				dbint_new(ctx, initsize), 1);
+		r->meta.chunksize = initsize;
+		r->meta.id = _offset(ctx, dbstring_new(ctx, "_id", 3));
 	} else {
 
 		for(offset=0; offset<ctx->mm.size; offset+=mb->mb_size) {
@@ -155,7 +151,6 @@ pgctx_t *dbfile_open(const char *filename, uint32_t initsize)
 			_addmemblock(ctx, mb);
 		}
 		ctx->data = _ptr(ctx, ctx->root->data);
-		ctx->meta = _ptr(ctx, ctx->root->meta);
 		ctx->cache = _ptr(ctx, ctx->root->cache);
 		log_verbose("data=%p cache=%p", ctx->data, ctx->cache);
 		// Probably don't want to run the GC here...
@@ -166,16 +161,12 @@ pgctx_t *dbfile_open(const char *filename, uint32_t initsize)
 
 void dbfile_addsize(pgctx_t *ctx)
 {
-	dbtype_t *chunk;
-	uint64_t chunksize = 16777216;
+	uint64_t chunksize;
 	uint64_t oldsize;
 	memblock_t *mb;
 	int ret, n;
 
-	if (dbobject_getstr(ctx, ctx->meta, "chunksize", &chunk) == 0) {
-		chunksize = chunk->ival;
-	}
-
+	chunksize = ctx->root->meta.chunksize;
 	oldsize = ctx->mm.size;
 	log_debug("Resizing mmfile +%d bytes", chunksize);
 	ret = mm_resize(&ctx->mm, ctx->mm.size + chunksize);
@@ -228,6 +219,12 @@ void dbfile_resize(pgctx_t *ctx)
 
 void dbfile_close(pgctx_t *ctx)
 {
+	int i;
+	for(i=0; i<NR_DB_CONTEXT; i++) {
+		if (dbctx[i] == ctx) {
+			dbctx[i] = NULL;
+		}
+	}
         mm_close(&ctx->mm);
 }
 
@@ -498,8 +495,7 @@ int _db_gc(pgctx_t *ctx, gcstats_t *stats)
 	t2 = utime_now();
 
 	// Eliminate references that have parents that extend back to
-	// the root "meta" and "data" objects
-	gc_walk(ctx, hash, ctx->meta);
+	// the root "data" objects
 	gc_walk(ctx, hash, ctx->data);
 	t3 = utime_now();
 	// Free everything that remains
@@ -543,6 +539,14 @@ static void gc_keep(pgctx_t *ctx, void *addr)
 	pmem_gc_keep(__mb_ptr(ctx, addr), addr);
 }
 
+static void gc_walk_cache(pgctx_t *ctx, dbtype_t *node)
+{
+	if (!node) return;
+	gc_keep(ctx, node);
+	gc_walk_cache(ctx, _ptr(ctx, node->left));
+	gc_walk_cache(ctx, _ptr(ctx, node->right));
+}
+
 static void gc_walk(pgctx_t *ctx, dbtype_t *root)
 {
 	int i;
@@ -567,6 +571,18 @@ static void gc_walk(pgctx_t *ctx, dbtype_t *root)
 				gc_walk(ctx, _ptr(ctx, obj->item[i].value));
 			}
 			break;
+		case Collection:
+			gc_walk(ctx, _ptr(ctx, root->obj));
+			break;
+		case Cache:
+			gc_walk_cache(ctx, _ptr(ctx, root->cache));
+			break;
+		case _BonsaiNode:
+			gc_walk(ctx, _ptr(ctx, root->left));
+			gc_keep(ctx, _ptr(ctx, root->key));
+			gc_keep(ctx, _ptr(ctx, root->value));
+			gc_walk(ctx, _ptr(ctx, root->right));
+			break;
 		default:
 			// Nothing to do
 			break;
@@ -577,7 +593,7 @@ static void gc_walk(pgctx_t *ctx, dbtype_t *root)
 int _db_gc(pgctx_t *ctx, gcstats_t *stats)
 {
 	int i;
-	int64_t t0, t1, t2, t3, t4;
+	int64_t t0, t1, t2, t3, t4, t5;
 	memblock_t *mb;
 
 	t0 = utime_now();
@@ -618,18 +634,21 @@ int _db_gc(pgctx_t *ctx, gcstats_t *stats)
 	// Eliminate the const booleans
 	gc_keep(ctx, _ptr(ctx, ctx->root->booleans[0]));
 	gc_keep(ctx, _ptr(ctx, ctx->root->booleans[1]));
+	gc_keep(ctx, _ptr(ctx, ctx->root->meta.id));
 
-	if (ctx->cache) {
-		gc_keep(ctx, ctx->cache);
-		gc_keep(ctx, _ptr(ctx, ctx->cache->cache));
-	}
 	t2 = utime_now();
+	if (ctx->cache) {
+		gc_walk(ctx, ctx->cache);
+	}
+	t3 = utime_now();
 
 	// Eliminate references that have parents that extend back to
-	// the root "meta" and "data" objects
-	gc_walk(ctx, ctx->meta);
+	// the root "data" objects
 	gc_walk(ctx, ctx->data);
-	t3 = utime_now();
+
+	// Also any references owned by any currently running processes
+	gc_walk(ctx, ctx->pidcache);
+	t4 = utime_now();
 	// Free everything that remains
 	for(i=0; i<ctx->nr_mb; i++) {
 		mb = ctx->mb[i];
@@ -640,13 +659,14 @@ int _db_gc(pgctx_t *ctx, gcstats_t *stats)
 			pmem_foreach(mb, gc_count, &stats->after);
 		}
 	}
-	t4 = utime_now();
+	t5 = utime_now();
 	log_debug("GC timing:");
 	log_debug("  mark: %lldus", t1-t0);
 	log_debug("  sync: %lldus", t2-t1);
-	log_debug("  walk: %lldus", t3-t2);
-	log_debug("  free: %lldus", t4-t3);
-	log_debug(" total: %lldus", t4-t0);
+	log_debug(" cache: %lldus", t3-t2);
+	log_debug("  walk: %lldus", t4-t3);
+	log_debug("  free: %lldus", t5-t4);
+	log_debug(" total: %lldus", t5-t0);
 	return 0;
 }
 

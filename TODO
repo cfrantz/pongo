@@ -1,0 +1,20 @@
+TODO List:
+==========
+
+Memory leak?
+
+Generic object recreation registry.
+	a) __jsonclass__
+	b) __classname__
+
+Lock free dballoc.
+
+PongoDB server, horizontal sharding, mapreduce.
+
+Bindings to other languages:
+	a) javascript (node.js)
+	b) java
+	c) lua
+	d) perl
+
+Possibly implement an OrderedDict style object.

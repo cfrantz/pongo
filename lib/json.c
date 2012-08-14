@@ -1,11 +1,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pongo/bonsai.h>
 #include <pongo/json.h>
 #include <pongo/log.h>
 
 #include "yajl/yajl_parse.h"
 
+#define UC(x) ((unsigned char*)(x))
+#define UUID_FMT(uu, n) "uuid(%02hhx%02hhx%02hhx%02hhx-%02hhx%02hhx-%02hhx%02hhx-%02hhx%02hhx-%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx)%n", \
+	uu+0, uu+1, uu+2, uu+3, \
+	uu+4, uu+5, uu+6, uu+7, \
+	uu+8, uu+9, uu+10, uu+11, \
+	uu+12, uu+13, uu+14, uu+15, n
 
 
 static void stack_put(jsonctx_t *ctx, dbtype_t *value)
@@ -56,11 +63,23 @@ static int json_double(void *ctx, double val)
 	return 1;
 }
 
-static int json_string(void *ctx, const unsigned char *val, size_t len)
+static int json_string(void *ctx, const unsigned char *value, size_t len)
 {
 	jsonctx_t *c = (jsonctx_t*)ctx;
-	dbtype_t *s = dbstring_new(c->dbctx, (const char*)val, len);
-	//log_verbose("value: string(%d, %s) at %p\n", len, s->sval, s);
+    const char *val = (const char *)value;
+    dbtype_t *s;
+    uint8_t buf[16];
+    int64_t dt;
+    int n = 0;
+
+    if (sscanf(val, UUID_FMT(buf, &n)) == 17 && n==len) {
+        s = dbuuid_new(c->dbctx, buf);
+    } else if (sscanf(val, "datetime(%lld)%n", &dt, &n) == 2 && n==len) {
+		s = dbtime_new(c->dbctx, dt);
+    } else {
+	    s = dbstring_new(c->dbctx, val, len);
+    }
+   	//log_verbose("value: string(%d, %s) at %p\n", len, s->sval, s);
 	stack_put(c, s);
 	return 1;
 }
@@ -95,21 +114,17 @@ static dbtype_t *json_custom_type(void *ctx, dbtype_t *json)
 		return json;
 	dblist_getitem(c->dbctx, list, 0, &constructor);
 	dblist_getitem(c->dbctx, list, 1, &args);
-#if 0
+
 	if (!strcmp((char*)constructor->sval, "uuid")) {
 		dblist_getitem(c->dbctx, args, 0, &value);
 		obj = dbuuid_new_fromstring(c->dbctx, (char*)value->sval);
-	} else
-#endif
-    if (!strcmp((char*)constructor->sval, "datetime")) {
+	} else if (!strcmp((char*)constructor->sval, "datetime")) {
 		dblist_getitem(c->dbctx, args, 0, &value);
 		obj = dbtime_new(c->dbctx, value->ival);
 	} else {
 		log_error("Unknown __jsonclass__: %s\n", constructor->sval);
 		return json;
 	}
-	dbtypes_free(c->dbctx, json);
-
 	return obj;
 }
 
@@ -169,13 +184,20 @@ static void json_print(void *ctx, const char *str, size_t len)
     c->outstr[c->outlen] = 0;
 }
 
+static void collection_helper(pgctx_t *ctx, dbtype_t *node, void *user)
+{
+    jsonctx_t *j = (jsonctx_t*)user;
+    json_emit(j, _ptr(ctx, node->key));
+    json_emit(j, _ptr(ctx, node->value));
+}
+
 char *json_emit(jsonctx_t *ctx, dbtype_t *db)
 {
 	yajl_gen g = ctx->json.generator;
     _list_t *list;
     _obj_t *obj;
 	int i;
-	char buf[40];
+	char buf[64];
     uint8_t *uu;
 
 	if (db == NULL) {
@@ -194,11 +216,12 @@ char *json_emit(jsonctx_t *ctx, dbtype_t *db)
 		case String:
 			yajl_gen_string(g, db->sval, db->len); break;
 		case Uuid:
+#if 0
 			yajl_gen_config(g, yajl_gen_beautify, 0);
 			yajl_gen_map_open(g);
-			yajl_gen_string(g, "__jsonclass__", 13);
+			yajl_gen_string(g, UC("__jsonclass__"), 13);
 			yajl_gen_array_open(g);
-			yajl_gen_string(g, "uuid", 4);
+			yajl_gen_string(g, UC("uuid"), 4);
 			yajl_gen_array_open(g);
 			uu = db->uuval;
 			i = sprintf(buf, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
@@ -206,24 +229,38 @@ char *json_emit(jsonctx_t *ctx, dbtype_t *db)
 					uu[4], uu[5], uu[6], uu[7],
 					uu[8], uu[9], uu[10], uu[11],
 					uu[12], uu[13], uu[14], uu[15]);
-			yajl_gen_string(g, buf, i);
+			yajl_gen_string(g, UC(buf), i);
 			yajl_gen_array_close(g);
 			yajl_gen_array_close(g);
 			yajl_gen_map_close(g);
 			yajl_gen_config(g, yajl_gen_beautify, 1);
+#else
+			uu = db->uuval;
+			i = sprintf(buf, "uuid(%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x)",
+					uu[0], uu[1], uu[2], uu[3],
+					uu[4], uu[5], uu[6], uu[7],
+					uu[8], uu[9], uu[10], uu[11],
+					uu[12], uu[13], uu[14], uu[15]);
+			yajl_gen_string(g, UC(buf), i); break;
+#endif
 			break;
 		case Datetime:
+#if 0
 			yajl_gen_config(g, yajl_gen_beautify, 0);
 			yajl_gen_map_open(g);
-			yajl_gen_string(g, "__jsonclass__", 13);
+			yajl_gen_string(g, UC("__jsonclass__"), 13);
 			yajl_gen_array_open(g);
-			yajl_gen_string(g, "datetime", 8);
+			yajl_gen_string(g, UC("datetime"), 8);
 			yajl_gen_array_open(g);
 			yajl_gen_integer(g, db->utctime); 
 			yajl_gen_array_close(g);
 			yajl_gen_array_close(g);
 			yajl_gen_map_close(g);
 			yajl_gen_config(g, yajl_gen_beautify, 1);
+#else
+            i = sprintf(buf, "datetime(%lld)", db->utctime);
+			yajl_gen_string(g, UC(buf), i); break;
+#endif
 			break;
 		case List:
 			yajl_gen_array_open(g);
@@ -236,13 +273,16 @@ char *json_emit(jsonctx_t *ctx, dbtype_t *db)
 			yajl_gen_map_open(g);
             obj = _ptr(ctx->dbctx, db->obj);
 			for(i=0; i<obj->len; i++) {
-                if (obj->item[i].key) {
-    				json_emit(ctx, _ptr(ctx->dbctx, obj->item[i].key));
-    				json_emit(ctx, _ptr(ctx->dbctx, obj->item[i].value));
-                }
+				json_emit(ctx, _ptr(ctx->dbctx, obj->item[i].key));
+   				json_emit(ctx, _ptr(ctx->dbctx, obj->item[i].value));
 			}
 			yajl_gen_map_close(g);
 			break;
+		case Collection:
+			yajl_gen_map_open(g);
+            bonsai_foreach(ctx->dbctx, _ptr(ctx->dbctx, db->obj), collection_helper, ctx);
+			yajl_gen_map_close(g);
+            break;
 		default:
 			log_error("Unknown type: %d at %p\n", db->type, db);
 
@@ -280,7 +320,7 @@ dbtype_t *json_parse(jsonctx_t *ctx, char *buf, int len)
 {
     if (len == -1)
         len = strlen(buf);
-    yajl_parse(ctx->json.parser, buf, len);
+    yajl_parse(ctx->json.parser, UC(buf), len);
     return (ctx->depth == 0) ? ctx->stack[0] : NULL;
 }
 

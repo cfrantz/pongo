@@ -18,7 +18,7 @@ Primitive Immutable Types
 * Boolean
 * Integer
 * Datetime
-* Uuid -- not supported yet
+* Uuid
 * Float
 * ByteArray
 * String
@@ -28,8 +28,9 @@ Primitive Immutable Types
 
 Mutable Container Types
 -----------------------
-* List
-* Dictionary
+* List - A simple linear list structure.
+* Dictionary - A simple sorted list of key/value pairs.
+* Collection - A balanced binary tree containgin kv pairs.
 
 Updates
 =======
@@ -50,7 +51,7 @@ List Operations
 * dblist_insert(list, index, item)
 * dblist_remove(list, item)
 
-Dict Operations
+Dict and Collection Operations
 ===============
 * dbobject_new()
 * dbobject_getitem(dict, key)
@@ -80,7 +81,36 @@ Garbage Collection
       as allocated.
   4.  Free all remaining allocations
 
-The garbage collector doesn't know about items referenced on the
+The garbage collector does not know about items referenced on the
 stacks various processes.  As such, the GC must synchronize (step 2)
 with other processes.
+
+Objects returned to Python (proxy objects) are referenced by a "pidcache"
+so if an update to an object would unreference the object backing the
+proxy object, the older object will live as long as the Python proxy object.
+
+The "meta" object
+=================
+The "meta" object contains parameters that control how PongoDB behaves.
+Meta keys that start with a dot (.) are runtime properties and are not
+stored in the database meta structure.
+
+* chunksize controls how much space is added to the database file when
+  the internal dballoc fails (default is 16 MB).
+
+* id controls the named of the "id" key for objects added to a collection
+  and/or automatically given an id (default is "_id").
+
+* .newkey is the function to call to automatically generate an id.  When
+  it is None, uuid_generate_time() is used internally (default is None)
+
+* .uuid_class is the class object of the Python UUID class.  It is used
+  to recognize UUIDs when serializing primitive types to PongoDB.
+
+* .uuid_constructor is a callable that creates a Python UUID.  Normally,
+  it is the same as uuid_class, but the user can change it if needed.
+  uuid_constructore will always be called like this:
+
+    uuval = uuid_constructor(None, "16-byte-string")
+
 

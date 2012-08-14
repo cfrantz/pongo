@@ -1,11 +1,16 @@
 # Pongo Makefile
 #
 
-SRCS=containers.c dbmem.c dbtypes.c log.c mmfile.c pmem.c misc.c \
-     json.c
+SRCS=dbmem.c dbtypes.c log.c mmfile.c pmem.c misc.c json.c bonsai.c pidcache.c \
+     container_list.c \
+     container_obj.c \
+     container_coll.c \
+     container_cache.c \
+     container_ops.c 
+
 OBJS = $(SRCS:.c=.o)
 
-CFLAGS=-fms-extensions -g3 -O2 -Wall
+CFLAGS=-fms-extensions -g3 -O2 -Wall -DWANT_UUID_TYPE
 LIBS=-lc -luuid
 INCLUDE=-I../include 
 CC=gcc

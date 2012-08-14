@@ -4,7 +4,8 @@
 #include <pongo/mmfile.h>
 #include <pongo/_dbtypes.h>
 
-typedef struct _pgctx {
+typedef struct _pgctx pgctx_t;
+struct _pgctx {
 	mmfile_t mm;
 	// We keep two mb arrays: one sorted by ptr, the other by offset
 	memblock_t **mb;
@@ -12,9 +13,12 @@ typedef struct _pgctx {
 	int nr_mb, last_mb;
 	dbroot_t *root;
 	dbtype_t *cache;
-	dbtype_t *meta;
 	dbtype_t *data;
-} pgctx_t;
+	// This pidcache is the pidcache for the currently running process.
+	// The pidcache in root is the reference to the entire pidcache
+	dbtype_t *pidcache;
+	dbtype_t *(*newkey)(pgctx_t *ctx, dbtype_t *value);
+};
 
 // FIXME: this doesn't belong here
 extern void dbfile_resize(pgctx_t *ctx);
@@ -29,7 +33,7 @@ static inline memblock_t *__mb_ptr(pgctx_t *ctx, void *ptr)
 	imin = 0;
 	imax = ctx->nr_mb-1;
 	while(imax >= imin) {
-		imid = imax-imin / 2;
+		imid = imin + (imax-imin)/2;
 		m = ctx->mb[imid];
 		if ((uint8_t*)ptr < (uint8_t*)m) {
 			imax = imid-1;

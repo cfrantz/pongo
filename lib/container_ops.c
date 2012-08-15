@@ -14,39 +14,43 @@ int db_multi(pgctx_t *ctx, dbtype_t *obj, dbtype_t *path, multi_t op, dbtype_t *
     int n, i, r;
     dbtype_t *p;
     _list_t *list;
-    assert(path->type == List);
 
-    list = _ptr(ctx, path->list);
-    // Walk through "path" to the penultimate item
-    for(n=0; n<list->len-1; n++) {
-        dblist_getitem(ctx, path, n, &p);
-        if (obj->type == List) {
-            if (p->type == Int) {
-                i = p->ival;
-            } else if ((p->type == String || p->type == ByteBuffer) && isdigit(p->sval[0])) {
-                i = atoi((char*)p->sval);
+    if (path && path->type == List) {
+        list = _ptr(ctx, path->list);
+        // Walk through "path" to the penultimate item
+        for(n=0; n<list->len-1; n++) {
+            dblist_getitem(ctx, path, n, &p);
+            if (obj->type == List) {
+                if (p->type == Int) {
+                    i = p->ival;
+                } else if ((p->type == String || p->type == ByteBuffer) && isdigit(p->sval[0])) {
+                    i = atoi((char*)p->sval);
+                } else {
+                    return MULTI_ERR_PATH;
+                }
+                r = dblist_getitem(ctx, obj, i, &obj);
+                if (r<0)
+                    return MULTI_ERR_INDEX;
+            } else if (obj->type == Object) {
+                r = dbobject_getitem(ctx, obj, p, &obj);
+                if (r<0)
+                    return MULTI_ERR_KEY;
+            } else if (obj->type == Collection) {
+                r = dbcollection_getitem(ctx, obj, p, &obj);
+                if (r<0)
+                    return MULTI_ERR_KEY;
             } else {
-                return MULTI_ERR_PATH;
+                return MULTI_ERR_TYPE;
             }
-            r = dblist_getitem(ctx, obj, i, &obj);
-            if (r<0)
-                return MULTI_ERR_INDEX;
-        } else if (obj->type == Object) {
-            r = dbobject_getitem(ctx, obj, p, &obj);
-            if (r<0)
-                return MULTI_ERR_KEY;
-        } else if (obj->type == Collection) {
-            r = dbcollection_getitem(ctx, obj, p, &obj);
-            if (r<0)
-                return MULTI_ERR_KEY;
-        } else {
-            return MULTI_ERR_TYPE;
         }
+
+        // Now that obj is pointing at the second to last item, get the last
+        // item in the path and get/set/del the item.
+        dblist_getitem(ctx, path, n, &p);
+    } else {
+        p = path;
     }
 
-    // Now that obj is pointing at the second to last item, get the last
-    // item in the path and get/set/del the item.
-    dblist_getitem(ctx, path, n, &p);
     if (obj->type == List) {
         if (p->type == Int) {
             i = p->ival;
@@ -70,6 +74,11 @@ int db_multi(pgctx_t *ctx, dbtype_t *obj, dbtype_t *path, multi_t op, dbtype_t *
             r = dbobject_getitem(ctx, obj, p, value);
         } else if (op == multi_SET) {
             r = dbobject_setitem(ctx, obj, p, *value, sync);
+            if (sync & PUT_ID) {
+                // The PUT_ID option overwrites the value pointer on the way out
+                // to point to the value's (possibly newly created) "_id" object.
+                db_multi(ctx, *value, _ptr(ctx, ctx->root->meta.id), multi_GET, value, 0);
+            }
         } else if (op == multi_SET_OR_FAIL) {
             r = dbobject_setitem(ctx, obj, p, *value, sync | SET_OR_FAIL);
         } else if (op == multi_DEL) {
@@ -83,6 +92,11 @@ int db_multi(pgctx_t *ctx, dbtype_t *obj, dbtype_t *path, multi_t op, dbtype_t *
             r = dbcollection_getitem(ctx, obj, p, value);
         } else if (op == multi_SET) {
             r = dbcollection_setitem(ctx, obj, p, *value, sync);
+            if (sync & PUT_ID) {
+                // The PUT_ID option overwrites the value pointer on the way out
+                // to point to the value's (possibly newly created) "_id" object.
+                db_multi(ctx, *value, _ptr(ctx, ctx->root->meta.id), multi_GET, value, 0);
+            }
         } else if (op == multi_SET_OR_FAIL) {
             r = dbcollection_setitem(ctx, obj, p, *value, sync | SET_OR_FAIL);
         } else if (op == multi_DEL) {

@@ -159,13 +159,9 @@ PongoList_pop(PongoList *self, PyObject *args, PyObject *kwargs)
 static Py_ssize_t
 PongoList_length(PongoList *self)
 {
-    dbtype_t *db;
-    _list_t *list;
     int len;
     dblock(self->ctx);
-    db = _ptr(self->ctx, self->dblist);
-    list = _ptr(self->ctx, db->list);
-    len = list->len;
+    len = dblist_len(SELF_CTX_AND_DBLIST);
     dbunlock(self->ctx);
     return len;
 }
@@ -196,6 +192,23 @@ PongoList_native(PongoList *self)
 }
 
 static PyObject *
+PongoList_create(PyObject *self, PyObject *arg)
+{
+    PyObject *ret;
+    PongoCollection *ref = (PongoCollection*)arg;
+    dbtype_t *list;
+
+    if (pongo_check(ref))
+        return NULL;
+
+    dblock(ref->ctx);
+    list = dblist_new(ref->ctx);
+    ret = to_python(ref->ctx, list, 1);
+    dbunlock(ref->ctx);
+    return ret;
+}
+
+static PyObject *
 PongoList_repr(PyObject *ob)
 {
     PongoList *self = (PongoList*)ob;
@@ -218,6 +231,7 @@ static PyMethodDef pydblist_methods[] = {
     { "remove", (PyCFunction)PongoList_remove,       METH_VARARGS|METH_KEYWORDS, NULL },
     { "pop",    (PyCFunction)PongoList_pop,          METH_VARARGS|METH_KEYWORDS, NULL },
     { "native", (PyCFunction)PongoList_native,       METH_NOARGS, NULL },
+    { "create", (PyCFunction)PongoList_create,       METH_STATIC|METH_O, NULL },
     { NULL, NULL }
 };
 

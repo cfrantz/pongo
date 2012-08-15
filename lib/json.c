@@ -101,6 +101,7 @@ static int json_map_key(void *ctx, const unsigned char *key, size_t len)
 	return 1;
 }
 
+#if 0
 static dbtype_t *json_custom_type(void *ctx, dbtype_t *json)
 {
 	jsonctx_t *c = (jsonctx_t*)ctx;
@@ -127,11 +128,13 @@ static dbtype_t *json_custom_type(void *ctx, dbtype_t *json)
 	}
 	return obj;
 }
+#endif
 
 static int json_map_end(void *ctx)
 {
 	jsonctx_t *c = (jsonctx_t*)ctx;
-	dbtype_t *obj = json_custom_type(ctx, c->stack[c->depth--]);
+	dbtype_t *obj = c->stack[c->depth--];
+	//obj = json_custom_type(ctx, obj);
 	//log_verbose("map: }\n");
 	stack_put(c, obj);
 	return 1;

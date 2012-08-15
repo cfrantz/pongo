@@ -7,6 +7,7 @@ sources = [
     'python/pongo_dict.c',
     'python/pongo_coll.c',
 ]
+coverage = ['-fprofile-arcs', '-ftest-coverage']
 
 if sys.platform == 'win32':
     native = Extension("_pongo",
@@ -20,7 +21,10 @@ else:
             sources=sources,
             extra_objects = ['lib/libpongo.a', 'yajl/libyajl.a', '-luuid', '-lrt'],
             include_dirs = ['include'],
-            extra_compile_args=['-fms-extensions', '-g3', '-DWANT_UUID_TYPE'])
+            extra_compile_args=['-fms-extensions', '-g3', '-DWANT_UUID_TYPE']+coverage,
+            extra_link_args=['--coverage'],
+
+            )
 
 setup(
 	name="pongo",

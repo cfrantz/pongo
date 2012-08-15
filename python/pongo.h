@@ -41,5 +41,6 @@ extern PyObject* PongoCollection_Proxy(pgctx_t *ctx, dbtype_t *db);
 
 extern dbtype_t *from_python(pgctx_t *ctx, PyObject *ob);
 extern PyObject *to_python(pgctx_t *ctx, dbtype_t *db, int proxy);
+extern int pongo_check(PongoCollection *data);
 
 #endif

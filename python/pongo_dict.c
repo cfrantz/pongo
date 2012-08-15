@@ -127,20 +127,15 @@ PongoDict_get(PongoDict *self, PyObject *args, PyObject *kwargs)
             } else {
                 PyErr_SetObject(PyExc_KeyError, key);
             }
-        }
-#if 0
-        else if (dbobject_getitem(SELF_CTX_AND_DBOBJ, k, &v) < 0) {
-            dbfree(self->ctx, k);
+        } else if (dbobject_getitem(SELF_CTX_AND_DBOBJ, k, &v) == 0) {
+            ret = to_python(self->ctx, v, 1);
+        } else {
             if (dflt) {
-                Py_INCREF(dflt);
-                ret = dflt;
+                ret = dflt; Py_INCREF(ret);
             } else {
                 PyErr_SetObject(PyExc_KeyError, key);
             }
-        } else {
-            ret = to_python(self->ctx, v, 1);
         }
-#endif
     }
     dbunlock(self->ctx);
     return ret;
@@ -156,7 +151,7 @@ PongoDict_set(PongoDict *self, PyObject *args, PyObject *kwargs)
     dbtype_t *k=NULL, *v;
     int sync = SYNC;
     int fail = 0;
-    multi_t op;
+    multi_t op = multi_SET;
     char *kwlist[] = {"key", "value", "sep", "sync", "fail", NULL};
     char *sep = ".";
 
@@ -179,16 +174,22 @@ PongoDict_set(PongoDict *self, PyObject *args, PyObject *kwargs)
     v = from_python(self->ctx, value);
     if (!PyErr_Occurred()) {
         if (k && k->type == List) {
-            op = (fail) ? multi_SET_OR_FAIL : multi_SET;
+            if (fail) op = multi_SET_OR_FAIL;
             if (db_multi(SELF_CTX_AND_DBOBJ, k, op, &v, sync) == 0) {
                 ret = Py_None;
             } else {
                 PyErr_SetObject(PyExc_KeyError, key);
             }
-        } else if (dbobject_setitem(SELF_CTX_AND_DBOBJ, k, v, sync) == 0) {
-            ret = Py_None;
+        } else if (db_multi(SELF_CTX_AND_DBOBJ, k, op, &v, sync) == 0) {
+            // db_mutli will tell us the newly created value of
+            // "_id" when PUT_ID is enabled.
+            ret = (sync & PUT_ID) ? to_python(self->ctx, v, 1) : Py_None;
         } else {
-            PyErr_SetObject(PyExc_KeyError, key);
+            if (sync & PUT_ID) {
+                PyErr_Format(PyExc_ValueError, "value must be a dictionary");
+            } else {
+                PyErr_SetObject(PyExc_KeyError, key);
+            }
         }
     }
     dbunlock(self->ctx);
@@ -375,7 +376,7 @@ PongoDict_search(PongoDict *self, PyObject *args)
     } else if (!strcmp(rel, ">=") || !strcmp(rel, "ge")) {
         relop = db_GE;
     } else {
-        PyErr_Format(PyExc_Exception, "Unknown relop '%s'", rel);
+        PyErr_Format(PyExc_ValueError, "Unknown relop '%s'", rel);
         return NULL;
     }
 
@@ -385,7 +386,7 @@ PongoDict_search(PongoDict *self, PyObject *args)
     }
 
     if (!PySequence_Check(path)) {
-        PyErr_Format(PyExc_Exception, "path must be a sequence");
+        PyErr_Format(PyExc_TypeError, "path must be a sequence");
         return NULL;
     }
     dblock(self->ctx);
@@ -405,6 +406,23 @@ PongoDict_search(PongoDict *self, PyObject *args)
         PyErr_Format(PyExc_Exception, "path type isn't List (%d)", dbpath->type);
     }
     dbunlock(self->ctx);
+    return ret;
+}
+
+static PyObject *
+PongoDict_create(PyObject *self, PyObject *arg)
+{
+    PyObject *ret;
+    PongoCollection *ref = (PongoCollection*)arg;
+    dbtype_t *dict;
+
+    if (pongo_check(ref))
+        return NULL;
+
+    dblock(ref->ctx);
+    dict = dbobject_new(ref->ctx);
+    ret = to_python(ref->ctx, dict, 1);
+    dbunlock(ref->ctx);
     return ret;
 }
 
@@ -452,6 +470,7 @@ static PyMethodDef pydbdict_methods[] = {
     {"values",  (PyCFunction)PongoDict_values,       METH_NOARGS, NULL },
     {"items",   (PyCFunction)PongoDict_items,        METH_NOARGS, NULL },
     {"native",  (PyCFunction)PongoDict_native,       METH_NOARGS, NULL },
+    {"create",  (PyCFunction)PongoDict_create,       METH_STATIC|METH_O, NULL },
     {"json",    (PyCFunction)PongoDict_json,         METH_VARARGS, NULL },
     {"search",  (PyCFunction)PongoDict_search,       METH_VARARGS, NULL },
     { NULL, NULL },

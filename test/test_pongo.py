@@ -4,6 +4,28 @@ from datetime import datetime
 import _pongo as pongo
 import json
 
+class BadType(object):
+    pass
+
+class ToPongo(object):
+    def __topongo__(self):
+        return dict(a=1, b=2, c=3)
+
+class IterMapping(object):
+    def __init__(self):
+        self.val = dict(a=1,b=2,c=3)
+    def __getitem__(self, name):
+        return self.val[name]
+    def __setitem__(self, name, value):
+        self.val[name] = value
+    def __delitem__(self, name):
+        del self.val[name]
+    def __len__(self):
+        return len(self.val)
+    def __iter__(self):
+        for item in self.val.items():
+            yield item
+
 class TestPongo(unittest.TestCase):
     def setUp(self):
         self.db = pongo.open('test.db')
@@ -20,6 +42,7 @@ class TestPongo(unittest.TestCase):
                 "float-2": 2.0,
                 "float-avagadro": 6.022e23,
                 "str": "The quick brown fox",
+                "unicode": u"Fuzzy Wuzzy was a bear"
         }
         self.db['primitive'] = self.primitive
         self.db['list'] = [1,2,3,4,5,6]
@@ -32,6 +55,17 @@ class TestPongo(unittest.TestCase):
         for k, v in self.primitive.items():
             self.assertEqual(p[k], v)
 
+    def test_bad_type(self):
+        self.assertRaises(TypeError, self.db.set, 'badtype', BadType())
+
+    def test_to_pongo(self):
+        self.db['topongo'] = ToPongo()
+        self.assertEqual(self.db['topongo'].native(), dict(a=1,b=2,c=3))
+
+    def test_itermapping(self):
+        self.db['itermapping'] = IterMapping()
+        self.assertEqual(self.db['itermapping'].native(), dict(a=1,b=2,c=3))
+
     def test_types(self):
         self.assertTrue(isinstance(self.db, pongo.PongoCollection))
         self.assertTrue(isinstance(self.db['primitive'], pongo.PongoDict))
@@ -39,6 +73,8 @@ class TestPongo(unittest.TestCase):
 
     def test_list(self):
         l = self.db['list']
+        # repr
+        self.assertTrue(repr(l).startswith('PongoList'))
         # length
         self.assertEqual(len(l), 6)
         # iteration
@@ -63,8 +99,13 @@ class TestPongo(unittest.TestCase):
         l.remove(3)
         self.assertRaises(ValueError, l.remove, 99)
         
+        # setitem
+        l[4] = 7
         # native (after remove)
-        self.assertEqual(l.native(), [1,2,4,5,6])
+        self.assertEqual(l.native(), [1,2,4,5,7])
+
+        # delitem
+        del l[0]
         self.assertEqual(sum(l), 18)
 
     def test_dict(self):
@@ -86,6 +127,9 @@ class TestPongo(unittest.TestCase):
         }
         self.db['dict'] = mydict
         d = self.db['dict']
+
+        # repr
+        self.assertTrue(repr(d).startswith('PongoDict'))
 
         # length
         self.assertEqual(len(d), 4)
@@ -120,6 +164,10 @@ class TestPongo(unittest.TestCase):
         # delitem
         del d['e']
         self.assertRaises(KeyError, lambda: d['e']==1)
+        # del non-exist item
+        def doit():
+            del d['zzz']
+        self.assertRaises(KeyError, doit)
 
         # get
         self.assertEqual(d.get('f'), None)
@@ -141,22 +189,170 @@ class TestPongo(unittest.TestCase):
         d.set('d.z.4.m', False)
         self.assertEqual(d.get('d.z.4.m'), False)
 
+        # Non-str key for get/set
+        d.set(55, 66)
+        self.assertEqual(d.get(55), 66)
+
         # set with auto-id
         for i in range(8):
-            d.set(pongo.id, { "p": True, "q":i })
+            x = d.set(pongo.id, { "p": True, "q":i })
+            assertTrue(isinstance(x, uuid.UUID))
 
         # search
         r = d.search("p", "==", True)
         self.assertEqual(len(r), 8)
+        r = d.search("q", "!=", 0)
+        self.assertEqual(len(r), 7)
         r = d.search("q", "<", 4)
         self.assertEqual(len(r), 4)
+        r = d.search("q", "<=", 4)
+        self.assertEqual(len(r), 5)
         r = d.search("q", ">", 8)
         self.assertEqual(len(r), 0)
+        r = d.search("q", ">=", 4)
+        self.assertEqual(len(r), 4)
+        self.assertRaises(ValueError, d.search, "q", "$", 4)
+        self.assertRaises(TypeError, d.search, 4, "==", 4)
 
         # pop
         self.assertEqual(d.pop('f'), 5)
         self.assertEqual(d.pop('g', 6), 6)
         self.assertRaises(KeyError, d.pop, 'g')
+
+        # json 1-arg form
+        a = dict(a=1,b=2,c=3)
+        d.json(json.dumps(a))
+        self.assertEqual(d.native(), a)
+
+        # json 2-arg form
+        b = dict(x=7,y=8,z=9)
+        d.json('b', json.dumps(b))
+        self.assertEqual(d['b'].native(), b)
+
+    def test_collection(self):
+        mydict = {
+            "a":1,
+            "b":2,
+            "c":3,
+            "d": {
+                "x":10,
+                "y":20,
+                "z": [
+                    { "s": 100, "t": 1, "i": True },
+                    { "s": 200, "t": 1, "j": True },
+                    { "s": 300, "t": 1, "k": True },
+                    { "s": 400, "t": 1, "l": True },
+                    { "s": 400, "t": 1, "m": True },
+                ]
+            }
+        }
+
+        # Collections aren't created by simple assignment.
+        # They must be explicitly created.
+        # Note: the interior dict "d" will get translated
+        # into a PongoDict.
+        d = pongo.PongoCollection.create(self.db)
+        for k, v in mydict.items():
+            d[k] = v
+
+        # repr
+        self.assertTrue(repr(d).startswith('PongoCollection'))
+        # length
+        self.assertEqual(len(d), 4)
+
+        # keys/values/items
+        keys = d.keys()
+        values = d.values()
+        items = d.items()
+
+        self.assertEqual(keys, ['a', 'b', 'c', 'd'])
+        self.assertEqual(values[:3], [1,2,3])
+        # FIXME: right now there is no compare between Pongo proxy objects,
+        # so even if the proxies refer to the same object, their equality
+        # cannot be established
+        self.assertEqual(items[:3], zip(keys, values)[:3])
+
+        # native and json
+        self.assertEqual(d.native(), mydict)
+        d2 = json.loads(d.json())
+        self.assertEqual(d2, mydict)
+
+        # getitem
+        self.assertEqual(d['a'], 1)
+        self.assertEqual(d['b'], 2)
+        self.assertEqual(d['c'], 3)
+        self.assertRaises(KeyError, lambda: d['e']==1)
+
+        # setitem
+        d['e'] = 5
+        self.assertEqual(d['e'], 5)
+
+        # delitem
+        del d['e']
+        self.assertRaises(KeyError, lambda: d['e']==1)
+        # del non-exist item
+        def doit():
+            del d['zzz']
+        self.assertRaises(KeyError, doit)
+
+        # get
+        self.assertEqual(d.get('f'), None)
+        self.assertEqual(d.get('f', 1), 1)
+        self.assertEqual(d.get('d.x'), 10)
+        self.assertEqual(d.get('d/y', sep='/'), 20)
+
+        # set
+        d.set('f', 5)
+        self.assertEqual(d['f'], 5)
+
+        d.set('d.w', "Hello")
+        self.assertEqual(d.get('d.w'), "Hello")
+
+        d.set('d.once', 'foo', fail=True)
+        self.assertRaises(KeyError, d.set, key='d.once', value='bar', fail=True)
+        self.assertEqual(d.get('d.once'), "foo")
+
+        d.set('d.z.4.m', False)
+        self.assertEqual(d.get('d.z.4.m'), False)
+
+        # Non-str key for get/set
+        d.set(55, 66)
+        self.assertEqual(d.get(55), 66)
+
+        # set with auto-id
+        for i in range(8):
+            x = d.set(pongo.id, { "p": True, "q":i })
+            assertTrue(isinstance(x, uuid.UUID))
+    
+        # search
+        r = d.search("p", "==", True)
+        self.assertEqual(len(r), 8)
+        r = d.search("q", "!=", 0)
+        self.assertEqual(len(r), 7)
+        r = d.search("q", "<", 4)
+        self.assertEqual(len(r), 4)
+        r = d.search("q", "<=", 4)
+        self.assertEqual(len(r), 5)
+        r = d.search("q", ">", 8)
+        self.assertEqual(len(r), 0)
+        r = d.search("q", ">=", 4)
+        self.assertEqual(len(r), 4)
+        self.assertRaises(ValueError, d.search, "q", "$", 4)
+        self.assertRaises(TypeError, d.search, 4, "==", 4)
+
+        # pop
+        self.assertEqual(d.pop('f'), 5)
+        self.assertEqual(d.pop('g', 6), 6)
+        self.assertRaises(KeyError, d.pop, 'g')
+
+        # json 1-arg form
+        a = dict(a=1,b=2,c=3)
+        self.assertRaises(NotImplementedError, d.json, json.dumps(a))
+
+        # json 2-arg form
+        b = dict(x=7,y=8,z=9)
+        d.json('b', json.dumps(b))
+        self.assertEqual(d['b'].native(), b)
 
 
     def test_membership(self):
@@ -168,6 +364,20 @@ class TestPongo(unittest.TestCase):
 
         self.assertTrue(1 in self.db['list'])
         self.assertFalse(99 in self.db['list'])
+
+    def test_create(self):
+        l = pongo.PongoList.create(self.db)
+        self.assertTrue(isinstance(l, pongo.PongoList))
+        c = pongo.PongoCollection.create(self.db)
+        self.assertTrue(isinstance(c, pongo.PongoCollection))
+        d = pongo.PongoDict.create(self.db)
+        self.assertTrue(isinstance(d, pongo.PongoDict))
+
+    def test_pongo_check(self):
+        p = self.db['primitive']
+        self.assertRaises(TypeError, pongo.PongoList.create, p)
+        self.assertRaises(TypeError, pongo.PongoList.create, None)
+
 
 
 if __name__ == '__main__':

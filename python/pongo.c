@@ -283,11 +283,11 @@ pongo_open(PyObject *self, PyObject *args)
     return PongoCollection_Proxy(ctx, ctx->data);
 }
 
-static int
-pongo_check(PongoDict *data)
+int
+pongo_check(PongoCollection *data)
 {
     if ((Py_TYPE(data) != &PongoDict_Type && Py_TYPE(data) != &PongoCollection_Type) ||
-        data->dbobj != data->ctx->root->data) {
+        data->dbcoll != data->ctx->root->data) {
             PyErr_Format(PyExc_TypeError, "Argument must be a Pongo root object");
             return -1;
     }
@@ -297,7 +297,7 @@ pongo_check(PongoDict *data)
 static PyObject *
 pongo_close(PyObject *self, PyObject *args)
 {
-    PongoDict *data;
+    PongoCollection *data;
 
     if (!PyArg_ParseTuple(args, "O:close", &data))
         return NULL;
@@ -314,7 +314,7 @@ pongo_close(PyObject *self, PyObject *args)
 static PyObject *
 pongo_meta(PyObject *self, PyObject *args)
 {
-    PongoDict *data;
+    PongoCollection *data;
     pgctx_t *ctx;
     const char *key;
     PyObject *value = NULL, *ret = Py_None;
@@ -365,7 +365,7 @@ static PyObject *
 pongo_atoms(PyObject *self, PyObject *args)
 {
     PyObject *ret;
-    PongoDict *data;
+    PongoCollection *data;
 
     if (!PyArg_ParseTuple(args, "O:atoms", &data))
         return NULL;
@@ -386,7 +386,7 @@ static PyObject *
 pongo_pidcache(PyObject *self, PyObject *args)
 {
     PyObject *ret;
-    PongoDict *data;
+    PongoCollection *data;
     dbtype_t *pidcache;
 
     if (!PyArg_ParseTuple(args, "O:atoms", &data))
@@ -408,7 +408,7 @@ pongo_pidcache(PyObject *self, PyObject *args)
 static PyObject *
 pongo__object(PyObject *self, PyObject *args)
 {
-    PongoDict *data;
+    PongoCollection *data;
     uint64_t offset;
     dbtype_t *db;
 
@@ -424,7 +424,7 @@ pongo__object(PyObject *self, PyObject *args)
 static PyObject *
 pongo__info(PyObject *self, PyObject *args)
 {
-    PongoDict *data;
+    PongoCollection *data;
     uint64_t offset;
 
     if (!PyArg_ParseTuple(args, "O:_info", &data, &offset))
@@ -440,7 +440,7 @@ static PyObject *
 pongo_gc(PyObject *self, PyObject *args)
 {
     PyObject *ret = Py_None;
-    PongoDict *data;
+    PongoCollection *data;
     gcstats_t _stats;
     gcstats_t *stats = &_stats;
     int getstats = 1;

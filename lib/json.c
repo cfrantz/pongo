@@ -74,7 +74,7 @@ static int json_string(void *ctx, const unsigned char *value, size_t len)
 
     if (sscanf(val, UUID_FMT(buf, &n)) == 17 && n==len) {
         s = dbuuid_new(c->dbctx, buf);
-    } else if (sscanf(val, "datetime(%lld)%n", &dt, &n) == 2 && n==len) {
+    } else if (sscanf(val, "datetime(%" PRId64 ")%n", &dt, &n) == 2 && n==len) {
 		s = dbtime_new(c->dbctx, dt);
     } else {
 	    s = dbstring_new(c->dbctx, val, len);
@@ -261,7 +261,7 @@ char *json_emit(jsonctx_t *ctx, dbtype_t *db)
 			yajl_gen_map_close(g);
 			yajl_gen_config(g, yajl_gen_beautify, 1);
 #else
-            i = sprintf(buf, "datetime(%lld)", db->utctime);
+                        i = sprintf(buf, "datetime(%" PRId64 ")", db->utctime);
 			yajl_gen_string(g, UC(buf), i); break;
 #endif
 			break;

@@ -12,9 +12,16 @@ PyObject *pongo_newkey = Py_None;
 static dbtype_t *
 pongo_newkey_helper(pgctx_t *ctx, dbtype_t *value)
 {
+    // FIXME: something wrong here.
     PyObject *ob;
-    ob = PyObject_CallFunction(pongo_newkey, "O", to_python(ctx, value, 1));
-    return from_python(ctx, ob);
+    ob = PyObject_CallFunction(pongo_newkey, "(N)", to_python(ctx, value, 1));
+    if (ob) {
+        value = from_python(ctx, ob);
+        Py_DECREF(ob);
+    } else {
+        value = NULL;
+    }
+    return value;
 }
 
 typedef struct {
@@ -255,8 +262,7 @@ from_python(pgctx_t *ctx, PyObject *ob)
         db = _ptr(p->ctx, p->dbcoll);
     } else {
         // FIXME: Unknown object type
-        printf("Type = %p", Py_TYPE(ob));
-        PyErr_SetObject(PyExc_TypeError, ob);
+        PyErr_SetObject(PyExc_TypeError, (PyObject*)Py_TYPE(ob));
         db = NULL;
     }
     return db;
@@ -331,6 +337,9 @@ pongo_meta(PyObject *self, PyObject *args)
     } else if (!strcmp(key, "id")) {
         ret = to_python(ctx, _ptr(ctx, ctx->root->meta.id), 0);
         if (value) ctx->root->meta.id = _offset(ctx, from_python(ctx, value));
+    } else if (!strcmp(key, ".sync")) {
+        ret = PyInt_FromLong(ctx->sync);
+        if (value && value != Py_None) ctx->sync = PyInt_AsLong(value);
 #ifdef WANT_UUID_TYPE
     } else if (!strcmp(key, ".uuid_class")) {
         ret = (PyObject*)uuid_class;

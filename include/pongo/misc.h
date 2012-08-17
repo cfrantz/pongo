@@ -48,8 +48,8 @@ static inline uint32_t hash_python(const uint8_t *str)
 		len++;
 	}
 	hash ^= len;
-	if (hash == -1UL)
-		hash = -2UL;
+	if (hash == 0xFFFFFFFF)
+		hash = 0xFFFFFFFE;
 	return hash;
 }
 
@@ -62,8 +62,8 @@ static inline uint32_t hash_x31(const uint8_t *str, int len)
 		ch = *str++;
 		hash = (hash*31) + ch;
 	}
-	if (hash == -1UL)
-		hash = -2UL;
+	if (hash == 0xFFFFFFFF)
+		hash = 0xFFFFFFFE;
 	return hash;
 }
 

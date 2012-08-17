@@ -105,6 +105,8 @@ pgctx_t *dbfile_open(const char *filename, uint32_t initsize)
 		}
 	}
 	ret = mm_open(&ctx->mm, filename, initsize);
+	if (ret < 0)
+		return NULL;
 	ctx->root = ctx->mm.map[0].ptr;
 #ifdef WANT_UUID_TYPE
 	ctx->newkey = _newkey;
@@ -156,18 +158,17 @@ pgctx_t *dbfile_open(const char *filename, uint32_t initsize)
 		// Probably don't want to run the GC here...
 		//db_gc(ctx, NULL);
 	}
+	ctx->sync = 1;
 	return ctx;
 }
 
 void dbfile_addsize(pgctx_t *ctx)
 {
 	uint64_t chunksize;
-	uint64_t oldsize;
 	memblock_t *mb;
 	int ret, n;
 
 	chunksize = ctx->root->meta.chunksize;
-	oldsize = ctx->mm.size;
 	log_debug("Resizing mmfile +%d bytes", chunksize);
 	ret = mm_resize(&ctx->mm, ctx->mm.size + chunksize);
 	if (ret != 0) {
@@ -646,8 +647,8 @@ int _db_gc(pgctx_t *ctx, gcstats_t *stats)
 	// the root "data" objects
 	gc_walk(ctx, ctx->data);
 
-	// Also any references owned by any currently running processes
-	gc_walk(ctx, ctx->pidcache);
+	// Also any references owned by all currently running processes
+	gc_walk(ctx, _ptr(ctx, ctx->root->pidcache));
 	t4 = utime_now();
 	// Free everything that remains
 	for(i=0; i<ctx->nr_mb; i++) {

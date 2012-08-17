@@ -5,7 +5,7 @@ SRCS=pongogc.c
 OBJS = $(SRCS:.c=.o)
 
 CFLAGS=-fms-extensions -g3 -O2 -Wall
-LIBS=-lm -luuid -lrt
+LIBS=-lm -luuid -lrt --coverage
 INCLUDE=-Iinclude 
 CC=gcc
 LD=gcc
@@ -15,6 +15,9 @@ LD=gcc
 
 pongogc: $(OBJS) lib/libpongo.a
 	$(LD) -o $@ $< lib/libpongo.a $(LIBS)
+
+struct-check: struct-check.c
+	$(CC) $(CFLAGS) $(INCLUDE) -o struct-check $<
 
 all: pongogc
 

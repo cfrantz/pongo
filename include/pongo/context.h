@@ -11,6 +11,7 @@ struct _pgctx {
 	memblock_t **mb;
 	memblock_t **mb_offset;
 	int nr_mb, last_mb;
+	int sync;
 	dbroot_t *root;
 	dbtype_t *cache;
 	dbtype_t *data;

@@ -52,7 +52,7 @@ PongoCollection_SetItem(PongoCollection *self, PyObject *key, PyObject *value)
     k = from_python(self->ctx, key);
     if (!PyErr_Occurred()) {
         if (value == NULL) {
-            if (dbcollection_delitem(SELF_CTX_AND_DBCOLL, k, &v, SYNC) == 0) {
+            if (dbcollection_delitem(SELF_CTX_AND_DBCOLL, k, &v, self->ctx->sync) == 0) {
                 ret = 0;
             } else {
                 PyErr_SetObject(PyExc_KeyError, key);
@@ -60,7 +60,7 @@ PongoCollection_SetItem(PongoCollection *self, PyObject *key, PyObject *value)
             dbfree(self->ctx, k);
         } else {
             v = from_python(self->ctx, value);
-            if (!PyErr_Occurred() && dbcollection_setitem(SELF_CTX_AND_DBCOLL, k, v, SYNC) == 0)
+            if (!PyErr_Occurred() && dbcollection_setitem(SELF_CTX_AND_DBCOLL, k, v, self->ctx->sync) == 0)
                 ret = 0;
         }
     }
@@ -151,7 +151,7 @@ PongoCollection_set(PongoCollection *self, PyObject *args, PyObject *kwargs)
     PyObject *klist = NULL;
     PyObject *ret = NULL;
     dbtype_t *k=NULL, *v;
-    int sync = SYNC;
+    int sync = self->ctx->sync;
     int fail = 0;
     multi_t op = multi_SET;
     char *kwlist[] = {"key", "value", "sep", "sync", "fail", NULL};
@@ -205,7 +205,7 @@ PongoCollection_pop(PongoCollection *self, PyObject *args, PyObject *kwargs)
     PyObject *key, *dflt = NULL;
     PyObject *ret = NULL;
     dbtype_t *k, *v;
-    int sync = SYNC;
+    int sync = self->ctx->sync;
     char *kwlist[] = {"key", "default", "sync", NULL};
 
     if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|Oi:pop", kwlist,
@@ -215,7 +215,7 @@ PongoCollection_pop(PongoCollection *self, PyObject *args, PyObject *kwargs)
     dblock(self->ctx);
     k = from_python(self->ctx, key);
     if (!PyErr_Occurred()) {
-        if (dbcollection_delitem(SELF_CTX_AND_DBCOLL, k, &v, SYNC) < 0) {
+        if (dbcollection_delitem(SELF_CTX_AND_DBCOLL, k, &v, sync) < 0) {
             dbfree(self->ctx, k);
             if (dflt) {
                 Py_INCREF(dflt);
@@ -340,7 +340,7 @@ PongoCollection_json(PongoCollection *self, PyObject *args)
             // inserts dict['key'] = json_parse('value')
             k = dbstring_new(self->ctx, key, klen);
             obj = json_parse(jctx, val, vlen);
-            dbcollection_setitem(SELF_CTX_AND_DBCOLL, k, obj, SYNC);
+            dbcollection_setitem(SELF_CTX_AND_DBCOLL, k, obj, self->ctx->sync);
             Py_INCREF(ret);
         } else {
             // 1-arg form is replace dict.items with parsed json
@@ -443,14 +443,13 @@ PongoCollection_repr(PyObject *ob)
 {
     PongoCollection *self = (PongoCollection*)ob;
     char buf[32];
-    sprintf(buf, "0x%llx", self->dbcoll);
+    sprintf(buf, "0x%" PRIx64, self->dbcoll);
     return PyString_FromFormat("PongoCollection(%p, %s)", self->ctx, buf);
 }
 
 void PongoCollection_Del(PyObject *ob)
 {
     PongoCollection *self = (PongoCollection*)ob;
-    //printf("PongoCollection_Del %p %08llx\n", self, self->dbcoll);
     pidcache_del(self->ctx, self);
     PyObject_Del(ob);
 }

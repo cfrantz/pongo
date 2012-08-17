@@ -45,10 +45,10 @@ PongoList_SetItem(PongoList *self, Py_ssize_t i, PyObject *v)
     dblock(self->ctx);
     if (i>=0) {
         if (v == NULL) {
-            ret = dblist_delitem(SELF_CTX_AND_DBLIST, i, &item, SYNC);
+            ret = dblist_delitem(SELF_CTX_AND_DBLIST, i, &item, self->ctx->sync);
         } else {
             item = from_python(self->ctx, v);
-            if (!PyErr_Occurred() && dblist_setitem(SELF_CTX_AND_DBLIST, i, item, SYNC) == 0) {
+            if (!PyErr_Occurred() && dblist_setitem(SELF_CTX_AND_DBLIST, i, item, self->ctx->sync) == 0) {
                 ret = 0;
             }
         }
@@ -64,7 +64,7 @@ PongoList_append(PongoList *self, PyObject *args, PyObject *kwargs)
 {
     PyObject *ret = NULL;
     PyObject *v;
-    int sync = SYNC;
+    int sync = self->ctx->sync;
     char *kwlist[] = {"value", "sync", NULL};
     dbtype_t *item;
 
@@ -86,7 +86,7 @@ PongoList_insert(PongoList *self, PyObject *args, PyObject *kwargs)
 {
     Py_ssize_t i;
     PyObject *v;
-    int sync = SYNC;
+    int sync = self->ctx->sync;
     PyObject *ret = NULL;
     dbtype_t *item;
     char *kwlist[] = {"value", "sync", NULL};
@@ -114,7 +114,7 @@ PongoList_remove(PongoList *self, PyObject *args, PyObject *kwargs)
     PyObject *ret = NULL;
     dbtype_t *item;
     PyObject *v;
-    int sync = SYNC;
+    int sync = self->ctx->sync;
     char *kwlist[] = {"value", "sync", NULL};
 
     if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|i:remove", kwlist,
@@ -139,7 +139,7 @@ PongoList_pop(PongoList *self, PyObject *args, PyObject *kwargs)
     Py_ssize_t i = -1;
     dbtype_t *item;
     PyObject *ret = NULL;
-    int sync = SYNC;
+    int sync = self->ctx->sync;
     char *kwlist[] = {"n", "sync", NULL};
 
     if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|ni:pop", kwlist,
@@ -213,14 +213,13 @@ PongoList_repr(PyObject *ob)
 {
     PongoList *self = (PongoList*)ob;
     char buf[32];
-    sprintf(buf, "0x%llx", self->dblist);
+    sprintf(buf, "0x%" PRIx64, self->dblist);
     return PyString_FromFormat("PongoList(%p, %s)", self->ctx, buf);
 }
 
 void PongoList_Del(PyObject *ob)
 {
     PongoList *self = (PongoList*)ob;
-    //printf("PongoList_Del %p %08llx\n", self, self->dblist);
     pidcache_del(self->ctx, self);
     PyObject_Del(ob);
 }

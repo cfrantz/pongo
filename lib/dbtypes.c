@@ -331,10 +331,10 @@ char *dbprint(dbtype_t *t, char *buf, int n)
 			snprintf(buf, n, t->bval ? "true" : "false");
 			break;
 		case Int:
-			snprintf(buf, n, "%lld", t->ival);
+			snprintf(buf, n, "%" PRId64, t->ival);
 			break;
 		case Datetime:
-			snprintf(buf, n, "datetime(%lld)", t->ival);
+			snprintf(buf, n, "datetime(%" PRId64 ")", t->ival);
 			break;
 		case Float:
 			snprintf(buf, n, "%.3f", t->fval);

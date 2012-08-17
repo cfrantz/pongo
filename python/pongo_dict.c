@@ -50,7 +50,7 @@ PongoDict_SetItem(PongoDict *self, PyObject *key, PyObject *value)
     k = from_python(self->ctx, key);
     if (!PyErr_Occurred()) {
         if (value == NULL) {
-            if (dbobject_delitem(SELF_CTX_AND_DBOBJ, k, &v, SYNC) == 0) {
+            if (dbobject_delitem(SELF_CTX_AND_DBOBJ, k, &v, self->ctx->sync) == 0) {
                 ret = 0;
             } else {
                 PyErr_SetObject(PyExc_KeyError, key);
@@ -58,7 +58,7 @@ PongoDict_SetItem(PongoDict *self, PyObject *key, PyObject *value)
             dbfree(self->ctx, k);
         } else {
             v = from_python(self->ctx, value);
-            if (!PyErr_Occurred() && dbobject_setitem(SELF_CTX_AND_DBOBJ, k, v, SYNC) == 0)
+            if (!PyErr_Occurred() && dbobject_setitem(SELF_CTX_AND_DBOBJ, k, v, self->ctx->sync) == 0)
                 ret = 0;
         }
     }
@@ -149,7 +149,7 @@ PongoDict_set(PongoDict *self, PyObject *args, PyObject *kwargs)
     PyObject *klist = NULL;
     PyObject *ret = NULL;
     dbtype_t *k=NULL, *v;
-    int sync = SYNC;
+    int sync = self->ctx->sync;
     int fail = 0;
     multi_t op = multi_SET;
     char *kwlist[] = {"key", "value", "sep", "sync", "fail", NULL};
@@ -203,7 +203,7 @@ PongoDict_pop(PongoDict *self, PyObject *args, PyObject *kwargs)
     PyObject *key, *dflt = NULL;
     PyObject *ret = NULL;
     dbtype_t *k, *v;
-    int sync = SYNC;
+    int sync = self->ctx->sync;
     char *kwlist[] = {"key", "default", "sync", NULL};
 
     if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|Oi:pop", kwlist,
@@ -213,7 +213,7 @@ PongoDict_pop(PongoDict *self, PyObject *args, PyObject *kwargs)
     dblock(self->ctx);
     k = from_python(self->ctx, key);
     if (!PyErr_Occurred()) {
-        if (dbobject_delitem(SELF_CTX_AND_DBOBJ, k, &v, SYNC) < 0) {
+        if (dbobject_delitem(SELF_CTX_AND_DBOBJ, k, &v, sync) < 0) {
             dbfree(self->ctx, k);
             if (dflt) {
                 Py_INCREF(dflt);
@@ -330,7 +330,7 @@ PongoDict_json(PongoDict *self, PyObject *args)
             // inserts dict['key'] = json_parse('value')
             k = dbstring_new(self->ctx, key, klen);
             obj = json_parse(jctx, val, vlen);
-            dbobject_setitem(SELF_CTX_AND_DBOBJ, k, obj, SYNC);
+            dbobject_setitem(SELF_CTX_AND_DBOBJ, k, obj, self->ctx->sync);
         } else {
             // 1-arg form is replace dict.items with parsed json
             obj = json_parse(jctx, key, klen);
@@ -431,14 +431,13 @@ PongoDict_repr(PyObject *ob)
 {
     PongoDict *self = (PongoDict*)ob;
     char buf[32];
-    sprintf(buf, "0x%llx", self->dbobj);
+    sprintf(buf, "0x%" PRIx64, self->dbobj);
     return PyString_FromFormat("PongoDict(%p, %s)", self->ctx, buf);
 }
 
 void PongoDict_Del(PyObject *ob)
 {
     PongoDict *self = (PongoDict*)ob;
-    //printf("PongoDict_Del %p %08llx\n", self, self->dbobj);
     pidcache_del(self->ctx, self);
     PyObject_Del(ob);
 }

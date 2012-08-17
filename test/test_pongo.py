@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime
 import _pongo as pongo
 import json
+import os
 
 class BadType(object):
     pass
@@ -26,9 +27,19 @@ class IterMapping(object):
         for item in self.val.items():
             yield item
 
+# FIXME: how to get a bound method to work?
+_key = 0
+def _newkey(value):
+    global _key
+    _key += 1
+    ret = 'foo-%d' % _key
+    return ret
+
 class TestPongo(unittest.TestCase):
     def setUp(self):
         self.db = pongo.open('test.db')
+        # We don't need full 2-phase commit for the test program
+        pongo.meta(self.db, '.sync', 0)
         self.primitive = {
                 "null": None,
                 "true": True,
@@ -70,6 +81,42 @@ class TestPongo(unittest.TestCase):
         self.assertTrue(isinstance(self.db, pongo.PongoCollection))
         self.assertTrue(isinstance(self.db['primitive'], pongo.PongoDict))
         self.assertTrue(isinstance(self.db['list'], pongo.PongoList))
+
+    def test_meta(self):
+        self.assertEqual(pongo.meta(self.db, 'chunksize'), 16*1024*1024)
+        self.assertEqual(pongo.meta(self.db, 'id'), "_id")
+        # FIXME: .sync, .uuid_class, .uuid_constructor
+
+    def test_newkey(self):
+        return
+        old = pongo.meta(self.db, '.newkey', _newkey)
+
+        self.assertEqual(self.db.set(pongo.id, {}), 'foo-1')
+        self.assertEqual(self.db.set(pongo.id, {}), 'foo-2')
+        self.assertEqual(self.db.set(pongo.id, {}), 'foo-3')
+        pongo.meta(self.db, '.newkey', old)
+
+    def test_atoms(self):
+        atoms = pongo.atoms(self.db)
+        self.assertTrue(isinstance(atoms, pongo.PongoCollection))
+
+    def test_pidcache(self):
+        # pongo.pidcache is for debug only and should not be used
+        pid = os.getpid()
+        pc = pongo.pidcache(self.db)
+        self.assertTrue(pid in pc)
+
+    def test__object(self):
+        # pongo._object is for debug only and should not be used
+        pass
+    def test__info(self):
+        # pongo._info is for debug only and should not be used
+        pass
+
+    def test_gc(self):
+        # There's nothing to check for here, but it gets the code
+        # covered by the coverage analyzer.
+        pongo.gc(self.db)
 
     def test_list(self):
         l = self.db['list']
@@ -196,7 +243,7 @@ class TestPongo(unittest.TestCase):
         # set with auto-id
         for i in range(8):
             x = d.set(pongo.id, { "p": True, "q":i })
-            assertTrue(isinstance(x, uuid.UUID))
+            self.assertTrue(isinstance(x, uuid.UUID))
 
         # search
         r = d.search("p", "==", True)
@@ -322,7 +369,7 @@ class TestPongo(unittest.TestCase):
         # set with auto-id
         for i in range(8):
             x = d.set(pongo.id, { "p": True, "q":i })
-            assertTrue(isinstance(x, uuid.UUID))
+            self.assertTrue(isinstance(x, uuid.UUID))
     
         # search
         r = d.search("p", "==", True)

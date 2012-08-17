@@ -431,7 +431,7 @@ bonsai_show(pgctx_t *ctx, dbtype_t *node, int depth)
         return;
 
     bonsai_show(ctx, GET(node->left), depth+1);
-    printf("%*s(%lld) %s=>%s\n",
+    printf("%*s(%" PRId64 ") %s=>%s\n",
             depth*2, "",
             node->size,
             dbprint(GET(node->key), buf1, sizeof(buf1)),

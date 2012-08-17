@@ -11,7 +11,7 @@ SRCS=dbmem.c dbtypes.c log.c mmfile.c pmem.c misc.c json.c bonsai.c pidcache.c \
 OBJS = $(SRCS:.c=.o)
 
 COVERAGE=-fprofile-arcs -ftest-coverage
-CFLAGS=-fms-extensions -g3 -O2 -Wall -DWANT_UUID_TYPE $(COVERAGE)
+CFLAGS=-fPIC -fms-extensions -g3 -O2 -Wall -DWANT_UUID_TYPE $(COVERAGE)
 LIBS=-lc -luuid
 INCLUDE=-I../include 
 CC=gcc
@@ -30,3 +30,4 @@ depend:
 
 clean:
 	find . -name "*.[oas]" | xargs rm
+	find . -name "*.gcno" | xargs rm

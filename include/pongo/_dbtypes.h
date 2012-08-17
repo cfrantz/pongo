@@ -80,7 +80,7 @@ typedef struct {
 
 typedef struct {
 	dbtag_t type;
-	uint32_t _pad[3];
+	uint32_t _uupad[3];
 	uint8_t uuval[16];
 } dbuuid_t;
 
@@ -126,13 +126,6 @@ typedef struct {
 	uint64_t obj;
 } dbcollection_t;
 
-//FIXME: get rid of _cache_t ?
-typedef struct {
-	uint32_t len;
-	uint32_t retry;
-	uint64_t item[];
-} _cache_t;
-
 typedef struct {
 	dbtag_t type;
 	uint32_t _pad;
@@ -147,7 +140,7 @@ typedef struct {
 	uint64_t size;
 } dbnode_t;
 
-#ifndef WIN32
+#if 0
 typedef union {
 	dbtag_t type;
 	dbboolean_t;
@@ -173,6 +166,13 @@ typedef struct {
 				int64_t ival;
 				int64_t utctime;
 				double fval;
+				uint64_t list;
+				uint64_t cache;
+				struct {
+					uint64_t left, right;
+					uint64_t key, value;
+					uint64_t size;
+				};
 			};
 		};
 		struct {
@@ -181,15 +181,20 @@ typedef struct {
 			uint8_t sval[];
 		};
 		struct {
-			uint32_t _padu[3];
+			uint32_t _uupad[3];
 			uint8_t uuval[16];
-		}
-		uint64_t list;
-		uint64_t obj;
-		uint64_t cache;
+		};
+		struct {
+			uint32_t refcnt; // used only by pidcache.  _pad for everyone else
+			union {
+				uint64_t obj;
+			};
+		};
 	};
 } dbtype_t;
 #endif
 #pragma pack()
 
+// vim: ts=4 sts=4 sw=4 expandtab:
 #endif
+

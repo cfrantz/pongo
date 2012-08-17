@@ -17,6 +17,8 @@ typedef signed int int32_t;
 typedef unsigned long long uint64_t;
 typedef signed long long int64_t;
 
+#define PRId64 "%lld"
+
 #define inline __inline
 #endif
 

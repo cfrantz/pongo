@@ -45,11 +45,11 @@ int dbcollection_contains(pgctx_t *ctx, dbtype_t *obj, dbtype_t *key)
 
 dbtype_t *dbcollection_new(pgctx_t *ctx)
 {
-	dbtype_t *obj;
-	obj = dballoc(ctx, sizeof(dbcollection_t));
-	obj->type = Collection;
+    dbtype_t *obj;
+    obj = dballoc(ctx, sizeof(dbcollection_t));
+    obj->type = Collection;
     obj->obj = 0;
-	return obj;
+    return obj;
 }
 
 int dbcollection_setitem(pgctx_t *ctx, dbtype_t *obj, dbtype_t *key, dbtype_t *value, int sync)
@@ -85,9 +85,9 @@ int dbcollection_getstr(pgctx_t *ctx, dbtype_t *obj, const char *key, dbtype_t *
 
 int dbcollection_update(pgctx_t *ctx, dbtype_t *obj, int n, updatecb_t elem, void *user, int sync)
 {
-	int i;
-	dbtype_t *key, *value;
-	assert(obj->type == Collection);
+    int i;
+    dbtype_t *key, *value;
+    assert(obj->type == Collection);
 
     for(i=0; i<n; i++) {
         if (elem(ctx, i, &key, &value, user) < 0)
@@ -100,7 +100,7 @@ int dbcollection_update(pgctx_t *ctx, dbtype_t *obj, int n, updatecb_t elem, voi
 int dbcollection_delitem(pgctx_t *ctx, dbtype_t *obj, dbtype_t *key, dbtype_t **value, int sync)
 {
     dbtype_t *node, *newnode;
-	assert(obj->type == Collection);
+    assert(obj->type == Collection);
     // Read-Copy-Update loop for safe modify
     do {
         node = _ptr(ctx, obj->obj);

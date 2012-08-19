@@ -72,7 +72,7 @@ dbtype_t *_string_new(pgctx_t *ctx, dbtag_t type, const char *val, int len)
 		hash = (hash*31) + ch;
 	}
 	*s = '\0';
-	if (hash == -1UL)
+	if (hash == -1)
 		hash = -2;
 	obj->hash = hash;
 	return cache_put(ctx, obj);

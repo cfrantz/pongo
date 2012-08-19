@@ -282,6 +282,7 @@ char *json_emit(jsonctx_t *ctx, dbtype_t *db)
 			yajl_gen_map_close(g);
 			break;
 		case Collection:
+		case Cache:
 			yajl_gen_map_open(g);
             bonsai_foreach(ctx->dbctx, _ptr(ctx->dbctx, db->obj), collection_helper, ctx);
 			yajl_gen_map_close(g);

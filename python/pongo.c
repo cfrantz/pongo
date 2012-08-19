@@ -209,7 +209,9 @@ from_python(pgctx_t *ctx, PyObject *ob)
         db = dbfloat_new(ctx, PyFloat_AsDouble(ob));
     } else if (PyString_Check(ob)) {
         PyString_AsStringAndSize(ob, &buf, &length);
-        db = dbbuffer_new(ctx, buf, length);
+        // FIXME:
+        //db = dbbuffer_new(ctx, buf, length);
+        db = dbstring_new(ctx, buf, length);
     } else if (PyUnicode_Check(ob)) {
         PyString_AsStringAndSize(ob, &buf, &length);
         db = dbstring_new(ctx, buf, length);
@@ -446,6 +448,20 @@ pongo__info(PyObject *self, PyObject *args)
 }
 
 static PyObject *
+pongo__show(PyObject *self, PyObject *args)
+{
+    PongoCollection *data;
+    dbtype_t *coll;
+
+    if (!PyArg_ParseTuple(args, "O:_info", &data))
+        return NULL;
+
+    coll = _ptr(data->ctx, data->dbcoll);
+    bonsai_show(data->ctx, _ptr(data->ctx, coll->obj), 0);
+    Py_RETURN_NONE;
+}
+
+static PyObject *
 pongo_gc(PyObject *self, PyObject *args)
 {
     PyObject *ret = Py_None;
@@ -479,6 +495,7 @@ static PyMethodDef _pongo_methods[] = {
     { "pidcache",  (PyCFunction)pongo_pidcache, METH_VARARGS, NULL },
     { "_object",(PyCFunction)pongo__object, METH_VARARGS, NULL },
     { "_info",  (PyCFunction)pongo__info, METH_VARARGS, NULL },
+    { "_show",  (PyCFunction)pongo__show, METH_VARARGS, NULL },
     { "gc",     (PyCFunction)pongo_gc, METH_VARARGS, NULL },
     { NULL, NULL },
 };

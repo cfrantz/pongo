@@ -4,13 +4,16 @@
 #include <pongo/mmfile.h>
 #include <pongo/_dbtypes.h>
 
+#define DBMEM_BUCKET_PAGE	8
+#define DBMEM_BUCKETS		9
 typedef struct _pgctx pgctx_t;
 struct _pgctx {
 	mmfile_t mm;
 	// We keep two mb arrays: one sorted by ptr, the other by offset
 	memblock_t **mb;
 	memblock_t **mb_offset;
-	int nr_mb, last_mb;
+	int nr_mb;
+	int last_mb[DBMEM_BUCKETS];
 	int sync;
 	dbroot_t *root;
 	dbtype_t *cache;

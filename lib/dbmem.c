@@ -241,12 +241,15 @@ void dbfile_sync(pgctx_t *ctx)
 
 int _dbmemlock(pgctx_t *ctx, memblock_t *mb, uint32_t op)
 {
+#ifndef PMEM_LOCKFREE
 	uint64_t chunk;
 	uint64_t locksz;
 
 	chunk = mb->mb_offset + mb->pg_size;
 	locksz = mb->pg_count * sizeof(uint32_t);
-	return mm_lock(&ctx->mm, op, chunk+mb->pg_size, locksz);
+	return mm_lock(&ctx->mm, op, chunk, locksz);
+#endif
+	return 0;
 }
 
 void dblock(pgctx_t *ctx)
@@ -265,9 +268,16 @@ void *_dballoc(pgctx_t *ctx, int size, int lock)
 	memblock_t *mb;
 	int n;
 	int tries;
+	int szcl;
 
+	if (size > 2048) {
+		szcl = DBMEM_BUCKET_PAGE;
+	} else {
+		size = (size + 15) & ~15;
+		szcl = ntz(pow2(size))-4;
+	}
 	for(tries=0; tries<3; tries++) {
-		n=ctx->last_mb;
+		n=ctx->last_mb[szcl];
 		do {
 			mb = ctx->mb[n];
 			// By convention, lock the page pool when doing alloc or free
@@ -276,7 +286,7 @@ void *_dballoc(pgctx_t *ctx, int size, int lock)
 			if (lock) _dbmemlock(ctx, mb, MLCK_UN);
 			if (ret) {
 				memset(ret, 0, psize(mb, ret));
-				ctx->last_mb = n;
+				ctx->last_mb[szcl] = n;
 				return ret;
 			} else {
 				//log_debug("malloc failed in mb=%p, offset=0x%llx", mb, mb->mb_offset);
@@ -288,7 +298,7 @@ void *_dballoc(pgctx_t *ctx, int size, int lock)
 #endif
 			}
 			n = (n+1) % ctx->nr_mb;
-		} while(n != ctx->last_mb);
+		} while(n != ctx->last_mb[szcl]);
 		//log_debug("malloc of %d bytes failed (tries=%d, nr_mb=%d, tid=%08lx)", size, tries, ctx->nr_mb, GetCurrentThreadId());
 		dbfile_resize(ctx);
 	}
@@ -535,9 +545,12 @@ int db_gc(pgctx_t *ctx, gcstats_t *stats)
 #ifdef MARKING_GC
 static void gc_keep(pgctx_t *ctx, void *addr)
 {
+	memblock_t *mb;
 	if (!addr)
 		return;
-	pmem_gc_keep(__mb_ptr(ctx, addr), addr);
+	mb = __mb_ptr(ctx, addr);
+	//printf("keeping type %02x at %p (%d bytes)\n", *(uint32_t*)addr, addr, psize(mb, addr));
+	pmem_gc_keep(mb, addr);
 }
 
 static void gc_walk_cache(pgctx_t *ctx, dbtype_t *node)
@@ -568,7 +581,7 @@ static void gc_walk(pgctx_t *ctx, dbtype_t *root)
 			obj = _ptr(ctx, root->obj);
 			gc_keep(ctx, obj);
 			for(i=0; i<obj->len; i++) {
-				gc_keep(ctx, _ptr(ctx, obj->item[i].key));
+				gc_walk(ctx, _ptr(ctx, obj->item[i].key));
 				gc_walk(ctx, _ptr(ctx, obj->item[i].value));
 			}
 			break;
@@ -580,8 +593,8 @@ static void gc_walk(pgctx_t *ctx, dbtype_t *root)
 			break;
 		case _BonsaiNode:
 			gc_walk(ctx, _ptr(ctx, root->left));
-			gc_keep(ctx, _ptr(ctx, root->key));
-			gc_keep(ctx, _ptr(ctx, root->value));
+			gc_walk(ctx, _ptr(ctx, root->key));
+			gc_walk(ctx, _ptr(ctx, root->value));
 			gc_walk(ctx, _ptr(ctx, root->right));
 			break;
 		default:
@@ -617,9 +630,9 @@ int _db_gc(pgctx_t *ctx, gcstats_t *stats)
 		//   by the time we go to the next phase.  That will prevent
 		//   us from freeing memory that wasn't referenced by one
 		//   of the root structures when we did the mark.
-		//_dblockop(ctx, MLCK_WR);
+		//_dbmemlock(ctx, mb, MLCK_WR);
 		pmem_gc_mark(mb);
-		//_dblockop(ctx, MLCK_UN);
+		//_dbmemlock(ctx, mb, MLCK_UN);
 	        if (stats)  {
 			pmem_foreach(ctx->mb[i], gc_count, &stats->before);
 		}

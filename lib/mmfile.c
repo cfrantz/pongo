@@ -11,8 +11,8 @@
 #include <pongo/log.h>
 #include <pongo/errors.h>
 
-//#define MMAP_SUGGEST (void*)0x10000000
-#define MMAP_SUGGEST NULL
+#define MMAP_SUGGEST (void*)0x10000000
+//#define MMAP_SUGGEST NULL
 
 void _addmap(mmfile_t *mm, void *ptr, uint64_t offset, uint64_t size)
 {

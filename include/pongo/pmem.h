@@ -3,6 +3,7 @@
 
 #include <pongo/stdtypes.h>
 
+#define PMEM_LOCKFREE 1
 #define PAGE_SIZE (4096)
 #define SMALLEST_ALLOC (16)
 
@@ -30,6 +31,9 @@ typedef struct _memblock {
 #define PM_SUBPAGEFULL	0x2
 #define PM_GC_MARK	0x4
 #define PM_RESERVED	0x8
+#define PM_GUARD	0xFF000000
+#define PM_SIZE(x)	( (x) & 0x00FFFFF0)
+#define PM_GUARD_INC(x) ( (x) + 0x01000000 )
 
 extern void *palloc(memblock_t *base, unsigned size);
 extern void pfree(memblock_t *base, void *addr);

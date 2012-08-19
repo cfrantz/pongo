@@ -62,6 +62,7 @@ int dbobject_setitem(pgctx_t *ctx, dbtype_t *obj, dbtype_t *key, dbtype_t *value
         _obj = _ptr(ctx, obj->obj);
         sz = dbobject_size(ctx, obj, 1);
         _newobj = dballoc(ctx, sz);
+        _newobj->type = _InternalObj;
         _newobj->len = _obj->len;
 
         for(done=i=j=0; i<_obj->len; i++,j++) {
@@ -246,6 +247,7 @@ int dbobject_delitem(pgctx_t *ctx, dbtype_t *obj, dbtype_t *key, dbtype_t **valu
         _obj = _ptr(ctx, obj->obj);
         sz = dbobject_size(ctx, obj, 0);
         _newobj = dballoc(ctx, sz);
+        _newobj->type = _InternalObj;
         _newobj->len = _obj->len - 1;
         for(done=i=j=0; i<_obj->len; i++) {
             k = _ptr(ctx, _obj->item[i].key);

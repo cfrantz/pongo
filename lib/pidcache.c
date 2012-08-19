@@ -54,6 +54,9 @@ void pidcache_destroy(pgctx_t *ctx)
 	dbtype_t *pid;
     int _pid;
 
+    if (ctx->pidcache == NULL)
+        return;
+
     root_pc = _ptr(ctx, ctx->root->pidcache);
     _pid = getpid();
 	pid = dbint_new(ctx, _pid);

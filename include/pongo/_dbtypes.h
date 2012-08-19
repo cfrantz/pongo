@@ -14,7 +14,7 @@ typedef enum {
 	Datetime =	0x03,
 	Uuid =		0x04,
 	Float =		0x05,
-	ByteBuffer =	0x06,
+	ByteBuffer =0x06,
 	String =	0x07,
 
 	// Container types (129-...)

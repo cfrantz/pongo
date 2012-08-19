@@ -25,7 +25,7 @@ static inline unsigned pow2(unsigned v)
 	return v;
 }
 
-static inline int pop(unsigned x) {
+static inline int pop32(uint32_t x) {
    x = x - ((x >> 1) & 0x55555555);
    x = (x & 0x33333333) + ((x >> 2) & 0x33333333);
    x = (x + (x >> 4)) & 0x0F0F0F0F;
@@ -34,8 +34,8 @@ static inline int pop(unsigned x) {
    return x >> 24;
 }
 
-static inline int ntz(unsigned x) {
-   return pop(~x & (x - 1));
+static inline int ntz(uint32_t x) {
+   return pop32(~x & (x - 1));
 }
 
 static inline uint32_t hash_python(const uint8_t *str)

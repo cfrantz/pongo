@@ -49,7 +49,7 @@ static inline int synchronize(pgctx_t *ctx, int sync, uint64_t *ptr, void *oldva
     // Synchronize to disk to insure that all data structures
     // are in a consistent state
     if (sync) dbfile_sync(ctx);
-    ret = cmpxchg(ptr, _offset(ctx, oldval), _offset(ctx, newval));
+    ret = cmpxchg64(ptr, _offset(ctx, oldval), _offset(ctx, newval));
     // If the atomic exchange was successfull, synchronize again
     // to write the newly exchanged word to disk
     if (ret && sync) dbfile_sync(ctx);

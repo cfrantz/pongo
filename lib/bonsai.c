@@ -8,7 +8,7 @@
 
 // A little shortcut for all the silly ctx pointer/offset conversions
 #define GET(x) ((dbtype_t*)_ptr(ctx, x))
-#define WEIGHT 2
+#define WEIGHT 4
 
 typedef enum {
     subtree_left, subtree_right

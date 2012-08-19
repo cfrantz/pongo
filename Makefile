@@ -5,7 +5,7 @@ SRCS=pongogc.c
 OBJS = $(SRCS:.c=.o)
 
 CFLAGS=-fms-extensions -g3 -O2 -Wall
-LIBS=-lm -luuid -lrt --coverage
+LIBS=-lm -luuid -lrt #--coverage
 INCLUDE=-Iinclude 
 CC=gcc
 LD=gcc
@@ -25,4 +25,4 @@ depend:
 	$(CC) -E -MM $(INCLUDE) $(ALLSRC) > .depend
 
 clean:
-	find . -name "*.[oas]" | xargs rm
+	rm -f pongogc pongogc.o struct-check

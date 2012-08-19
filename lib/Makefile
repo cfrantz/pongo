@@ -10,8 +10,8 @@ SRCS=dbmem.c dbtypes.c log.c mmfile.c pmem.c misc.c json.c bonsai.c pidcache.c \
 
 OBJS = $(SRCS:.c=.o)
 
-COVERAGE=-fprofile-arcs -ftest-coverage
-CFLAGS=-fPIC -fms-extensions -g3 -O2 -Wall -DWANT_UUID_TYPE $(COVERAGE)
+COVERAGE= #-fprofile-arcs -ftest-coverage
+CFLAGS=-fPIC -fms-extensions -g3 -Wall -DWANT_UUID_TYPE $(COVERAGE)
 LIBS=-lc -luuid
 INCLUDE=-I../include 
 CC=gcc

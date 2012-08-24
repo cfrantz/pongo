@@ -15,9 +15,6 @@
 #include <pongo/misc.h>
 #include <pongo/log.h>
 
-#undef SCANNING_GC
-#define MARKING_GC 1
-
 pgctx_t *dbctx[NR_DB_CONTEXT];
 
 #define _dblockop(ctx, op, lock) \
@@ -311,33 +308,6 @@ void *dballoc(pgctx_t *ctx, int size)
 	return _dballoc(ctx, size, 1);
 }
 
-#if 0
-void _dbfree(pgctx_t *ctx, void *addr, int lock)
-{
-	memblock_t *mb;
-
-	if (!addr) return;
-        mb = __mb_ptr(ctx, addr);
-	if (lock) {
-		// By convention, lock the page pool when doing alloc or free
-		_dbmemlock(ctx, mb, MLCK_WR);
-	}
-	pfree(mb, addr);
-	if (lock) {
-		_dbmemlock(ctx, mb, MLCK_UN);
-	}
-}
-
-void dbfree(pgctx_t *ctx, void *addr)
-{
-#ifndef MARKING_GC
-	// This competes with the GC and the marking GC may see
-	// double frees.  It would be ok to call free if we took
-	// the GC lock.
-	_dbfree(ctx, addr, 1);
-#endif
-}
-#endif
 void dbfree(pgctx_t *ctx, void *addr)
 {
 	memblock_t *mb;
@@ -362,199 +332,6 @@ static void gc_count(void *addr, int size, void *user)
 	c->num++;
 }
 
-#ifdef SCANNING_GC
-/***********************************************************************
- * Scanning Garbage collector:
- *
- * The garbage collector is a simple 2-pass collector:
- * 1. Collect all known allocations into a chained-bucket hash table
- * 2. Walk the data structures from the known roots and eliminate
- *    referenced pointers.
- *
- * Anything that remains in the hashtable is freed.
- *
- * The garbage collector can't examine thread (or process) stacks,
- * so, the collector can only run when no one is in the database.
-***********************************************************************/
-static void gc_collect(void *addr, int size, void *user)
-{
-	gchash_t *hash = (gchash_t*)user;
-	gcbucket_t *bucket;
-	uint32_t hofs = ((uint32_t)addr >> 4) % hash->hash_sz;
-	int len = 0;
-
-	bucket = hash->bucket[hofs];
-	if (!bucket || bucket->len % GC_BUCKET_LEN == 0) {
-		if (bucket) len = bucket->len;
-		bucket = realloc(bucket, sizeof(*bucket)+(len+GC_BUCKET_LEN)*sizeof(bucket->ptr[0]));
-		bucket->len = len;
-		hash->bucket[hofs] = bucket;
-	}
-
-	//log_verbose("Collecting %p", addr);
-	bucket->ptr[bucket->len++] = addr;
-}
-
-static void gc_keep(gchash_t *hash, void *addr)
-{
-	void *not_found = addr;
-	gcbucket_t *bucket;
-	uint32_t hofs = ((uint32_t)addr >> 4) % hash->hash_sz;
-	int i;
-
-	if (!addr)
-		return;
-
-	//log_verbose("Keeping %p", addr);
-	bucket = hash->bucket[hofs];
-	assert(bucket != NULL);
-	for(i=0; i<bucket->len; i++) {
-		if (bucket->ptr[i] == addr) {
-			bucket->ptr[i] = NULL;
-			return;
-		}
-	}
-	assert(addr == not_found);
-}
-
-static int gc_free(pgctx_t *ctx, gchash_t *hash)
-{
-	gcbucket_t *bucket;
-	void *ptr;
-	int i, j, total=0;
-
-	for(i=0; i<hash->hash_sz; i++) {
-		bucket = hash->bucket[i];
-		if (bucket) {
-			for(j=0; j<bucket->len; j++) {
-				ptr = bucket->ptr[j];
-				if (ptr) {
-					//log_verbose("GC freeing %p", ptr);
-					dbcache_del(ctx, ptr);
-					_dbfree(ctx, ptr, 0);
-					total++;
-				}
-			}
-			free(bucket);
-		}
-	}
-	free(hash);
-	return total;
-}
-
-static void gc_walk(pgctx_t *ctx, gchash_t *hash, dbtype_t *root)
-{
-	int i;
-	_list_t *list;
-	_obj_t *obj;
-	if (!root)
-		return;
-
-	gc_keep(hash, root);
-	switch(root->type) {
-		case List:
-			list = _ptr(ctx, root->list);
-			gc_keep(hash, list);
-			for(i=0; i<list->len; i++) 
-				gc_walk(ctx, hash, _ptr(ctx, list->item[i]));
-			break;
-		case Object:
-			obj = _ptr(ctx, root->obj);
-			gc_keep(hash, obj);
-			for(i=0; i<obj->len; i++) {
-				gc_keep(hash, _ptr(ctx, obj->item[i].key));
-				gc_walk(ctx, hash, _ptr(ctx, obj->item[i].value));
-			}
-			break;
-		default:
-			// Nothing to do
-			break;
-
-	}
-}
-
-int _db_gc(pgctx_t *ctx, gcstats_t *stats)
-{
-	int i, num;
-	int64_t t0, t1, t2, t3, t4, t5;
-	uint64_t offset;
-	memblock_t *mb;
-	_list_t *clist, *blist;
-	dblist_t *bucket;
-	gchash_t *hash = malloc(GC_HASH_MALLOC_SZ(GC_HASH_SZ));
-	memset(hash, 0, GC_HASH_MALLOC_SZ(GC_HASH_SZ));
-	hash->hash_sz = GC_HASH_SZ;
-
-	t0 = utime_now();
-	for(i=0; i<ctx->nr_mb; i++) {
-		mb = ctx->mb[i];
-	        if (stats) 
-	        	pmem_foreach(mb, gc_count, &stats->before);
-		// Collect all known allocations
-		pmem_foreach(mb, gc_collect, hash);
-	}
-	t1 = utime_now();
-
-	// Eliminate the const booleans and small integer pool
-	gc_keep(hash, _ptr(ctx, ctx->root->booleans[0]));
-	gc_keep(hash, _ptr(ctx, ctx->root->booleans[1]));
-#if 0
-	for(i=0; i<NR_SMALL_INTS; i++)
-		gc_keep(hash, _ptr(ctx, ctx->root->integers+i*16));
-#endif
-
-	if (ctx->cache) {
-		gc_keep(hash, ctx->cache);
-#if 0
-		clist = _ptr(ctx, ctx->cache->list);
-		gc_keep(hash, clist);
-		for(i=0; i<clist->len; i++) {
-			bucket = _ptr(ctx, clist->item[i]);
-			blist = _ptr(ctx, bucket->list);
-			gc_keep(hash, bucket); gc_keep(hash, blist);
-		}
-#endif
-	}
-	t2 = utime_now();
-
-	// Eliminate references that have parents that extend back to
-	// the root "data" objects
-	gc_walk(ctx, hash, ctx->data);
-	t3 = utime_now();
-	// Free everything that remains
-	num = gc_free(ctx, hash);
-	t4 = utime_now();
-        if (stats) {
-		for(i=0; i<ctx->nr_mb; i++) {
-			mb = ctx->mb[i];
-	        	pmem_foreach(mb, gc_count, &stats->after);
-		}
-	        log_debug("Memory utilization before gc=%d/%d, after=%d/%d",
-                                stats->before.num, stats->before.size,
-                                stats->after.num, stats->after.size);
-        }
-	t5 = utime_now();
-	log_debug("GC timing:");
-	log_debug("  Initial collection: %lldus", t1-t0);
-	log_debug("     Keep const pool: %lldus", t2-t1);
-	log_debug("                walk: %lldus", t3-t2);
-	log_debug("                free: %lldus", t4-t3);
-	log_debug("         final stats: %lldus", t5-t4);
-	log_debug("               total: %lldus", t5-t0);
-	return num;
-}
-
-int db_gc(pgctx_t *ctx, gcstats_t *stats)
-{
-	int num;
-	_dblockop(ctx, MLCK_WR, ctx->root->lock);
-	num = _db_gc(ctx, stats);
-	_dblockop(ctx, MLCK_UN, ctx->root->lock);
-	return num;
-}
-#endif
-
-#ifdef MARKING_GC
 static void gc_keep(pgctx_t *ctx, void *addr)
 {
 	memblock_t *mb;
@@ -730,4 +507,3 @@ int db_gc(pgctx_t *ctx, int complete, gcstats_t *stats)
 	_dblockop(ctx, MLCK_UN, ctx->root->gc);
 	return num;
 }
-#endif

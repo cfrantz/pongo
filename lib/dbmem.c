@@ -142,6 +142,7 @@ pgctx_t *dbfile_open(const char *filename, uint32_t initsize)
 		c->type = Boolean; c->bval = 1;
 		r->booleans[1] = _offset(ctx, c);
 
+		r->nr_mb = ctx->nr_mb;
 		r->meta.chunksize = initsize;
 		r->meta.id = _offset(ctx, dbstring_new(ctx, "_id", 3));
 	} else {
@@ -184,21 +185,21 @@ void dbfile_addsize(pgctx_t *ctx)
 	mb->pg_size = 4096;
 	mb->pg_count = chunksize / 4096;
 	_addmemblock(ctx, mb);
+	ctx->root->nr_mb = ctx->nr_mb;
 }
 
 void dbfile_resize(pgctx_t *ctx)
 {
-	uint64_t size, oldsize;
+	uint64_t size;
 	uint64_t offset;
 	memblock_t *mb;
 	int ret, n;
 
 	log_debug("Resizing mmfile");
-	_dblockop(ctx, MLCK_WR, ctx->root->resize_lock);
-	oldsize = ctx->mm.size;
-	size = mm_size(&ctx->mm);
-	if (size != oldsize) {
+	_dblockop(ctx, MLCK_WR, ctx->root->nr_mb);
+	if (ctx->nr_mb != ctx->root->nr_mb) {
 		// If the file has already been resized, just adjust our mapping
+		size = mm_size(&ctx->mm);
 		ret = mm_resize(&ctx->mm, size);
 		if (ret != 0) {
 			log_error("Resize failed"); abort();
@@ -215,7 +216,7 @@ void dbfile_resize(pgctx_t *ctx)
 		// Otherwise, add size to the file
 		dbfile_addsize(ctx);
 	}
-	_dblockop(ctx, MLCK_UN, ctx->root->resize_lock);
+	_dblockop(ctx, MLCK_UN, ctx->root->nr_mb);
 }
 
 void dbfile_close(pgctx_t *ctx)
@@ -310,6 +311,7 @@ void *dballoc(pgctx_t *ctx, int size)
 	return _dballoc(ctx, size, 1);
 }
 
+#if 0
 void _dbfree(pgctx_t *ctx, void *addr, int lock)
 {
 	memblock_t *mb;
@@ -335,6 +337,16 @@ void dbfree(pgctx_t *ctx, void *addr)
 	_dbfree(ctx, addr, 1);
 #endif
 }
+#endif
+void dbfree(pgctx_t *ctx, void *addr)
+{
+	memblock_t *mb;
+
+	if (!addr) return;
+        mb = __mb_ptr(ctx, addr);
+	pmem_gc_suggest(mb, addr);
+}
+
 
 int dbsize(pgctx_t *ctx, void *addr)
 {
@@ -673,6 +685,7 @@ int _db_gc(pgctx_t *ctx, gcstats_t *stats)
 			pmem_foreach(mb, gc_count, &stats->after);
 		}
 	}
+
 	t5 = utime_now();
 	log_debug("GC timing:");
 	log_debug("  mark: %lldus", t1-t0);
@@ -684,11 +697,36 @@ int _db_gc(pgctx_t *ctx, gcstats_t *stats)
 	return 0;
 }
 
-int db_gc(pgctx_t *ctx, gcstats_t *stats)
+int _db_gc_fast(pgctx_t *ctx)
+{
+	int i;
+	memblock_t *mb;
+
+	// Synchronize here.  All this does is make sure anyone who was
+	// in the database using the blocks that were suggested to be
+	// freed is now out of the database and the blocks can bex
+	// safely freed.
+	_dblockop(ctx, MLCK_WR, ctx->root->lock);
+	_dblockop(ctx, MLCK_UN, ctx->root->lock);
+
+	for(i=0; i<ctx->nr_mb; i++) {
+		mb = ctx->mb[i];
+		_dbmemlock(ctx, mb, MLCK_WR);
+		pmem_gc_free(mb, (gcfreecb_t)dbcache_del, ctx);
+		_dbmemlock(ctx, mb, MLCK_UN);
+	}
+	return 0;
+}
+
+int db_gc(pgctx_t *ctx, int complete, gcstats_t *stats)
 {
 	int num;
 	_dblockop(ctx, MLCK_WR, ctx->root->gc);
-	num = _db_gc(ctx, stats);
+	if (complete) {
+		num = _db_gc(ctx, stats);
+	} else {
+		num = _db_gc_fast(ctx);
+	}
 	_dblockop(ctx, MLCK_UN, ctx->root->gc);
 	return num;
 }

@@ -61,6 +61,7 @@ int dbobject_setitem(pgctx_t *ctx, dbtype_t *obj, dbtype_t *key, dbtype_t *value
         // Read-Copy-Update loop for safe modify
         _obj = _ptr(ctx, obj->obj);
         sz = dbobject_size(ctx, obj, 1);
+        dbfree(ctx, _newobj);
         _newobj = dballoc(ctx, sz);
         _newobj->type = _InternalObj;
         _newobj->len = _obj->len;
@@ -94,6 +95,7 @@ int dbobject_setitem(pgctx_t *ctx, dbtype_t *obj, dbtype_t *key, dbtype_t *value
             _newobj->len++;
         }
     } while(!synchronize(ctx, sync & SYNC_MASK, &obj->obj, _obj, _newobj));
+    dbfree(ctx, _obj);
     return 0;
 }
 
@@ -211,6 +213,7 @@ int dbobject_update(pgctx_t *ctx, dbtype_t *obj, int n, updatecb_t elem, void *u
     do {
         _obj = _ptr(ctx, obj->obj);
         sz = dbobject_size(ctx, obj, n);
+        dbfree(ctx, _newobj);
         _newobj = dballoc(ctx, sz);
         memcpy(_newobj, _obj, sizeof(_obj_t) + _obj->len*sizeof(_objitem_t));
         newlen = _newobj->len;
@@ -233,6 +236,7 @@ int dbobject_update(pgctx_t *ctx, dbtype_t *obj, int n, updatecb_t elem, void *u
         _newobj->len = newlen;
         _quicksort(ctx, _newobj->item, 0, newlen-1);
     } while(!synchronize(ctx, sync, &obj->obj, _obj, _newobj));
+    dbfree(ctx, _obj);
     return 0;
 }
 
@@ -246,6 +250,7 @@ int dbobject_delitem(pgctx_t *ctx, dbtype_t *obj, dbtype_t *key, dbtype_t **valu
     do {
         _obj = _ptr(ctx, obj->obj);
         sz = dbobject_size(ctx, obj, 0);
+        dbfree(ctx, _newobj);
         _newobj = dballoc(ctx, sz);
         _newobj->type = _InternalObj;
         _newobj->len = _obj->len - 1;
@@ -266,6 +271,7 @@ int dbobject_delitem(pgctx_t *ctx, dbtype_t *obj, dbtype_t *key, dbtype_t **valu
             return -1;
         }
     } while(!synchronize(ctx, sync, &obj->obj, _obj, _newobj));
+    dbfree(ctx, _obj);
     return 0;
 }
 

@@ -9,6 +9,7 @@
 // A little shortcut for all the silly ctx pointer/offset conversions
 #define GET(x) ((dbtype_t*)_ptr(ctx, x))
 #define WEIGHT 4
+#define rcufree(x) dbfree(ctx, x)
 
 typedef enum {
     subtree_left, subtree_right
@@ -43,6 +44,7 @@ single_left(pgctx_t *ctx, dbtype_t *left, dbtype_t *right, dbtype_t *key, dbtype
             bonsai_new(ctx, left, GET(right->left), key, value),
             GET(right->right),
             GET(right->key), GET(right->value));
+    rcufree(right);
     return ret;
 }
 
@@ -54,6 +56,8 @@ double_left(pgctx_t *ctx, dbtype_t *left, dbtype_t *right, dbtype_t *key, dbtype
             bonsai_new(ctx, left, GET(GET(right->left)->left), key, value),
             bonsai_new(ctx, GET(GET(right->left)->right), GET(right->right), GET(right->key), GET(right->value)),
                     GET(GET(right->left)->key), GET(GET(right->left)->value));
+    rcufree(GET(right->left));
+    rcufree(right);
     return ret;
 }
 
@@ -65,6 +69,7 @@ single_right(pgctx_t *ctx, dbtype_t *left, dbtype_t *right, dbtype_t *key, dbtyp
             GET(left->left),
             bonsai_new(ctx, GET(left->right), right, key, value),
             GET(left->key), GET(left->value));
+    rcufree(left);
     return ret;
 }
 
@@ -76,6 +81,8 @@ double_right(pgctx_t *ctx, dbtype_t *left, dbtype_t *right, dbtype_t *key, dbtyp
             bonsai_new(ctx, GET(left->left), GET(GET(left->right)->left), GET(left->key), GET(left->value)),
             bonsai_new(ctx, GET(GET(left->right)->right), right, key, value),
             GET(GET(left->right)->key), GET(GET(left->right)->value));
+    rcufree(GET(left->right));
+    rcufree(left);
     return ret;
 }
 
@@ -117,6 +124,7 @@ balance(pgctx_t *ctx, dbtype_t *cur, dbtype_t *left, dbtype_t *right, subtree_t 
     else
         goto balanced;
 
+    rcufree(cur);
     return ret;
 balanced:
     inplace = 0;
@@ -132,6 +140,7 @@ balanced:
         ret = cur;
     } else {
         ret = bonsai_new(ctx, left, right, key, value);
+        rcufree(cur);
     }
     return ret;
 }
@@ -238,6 +247,8 @@ _bonsai_delete(pgctx_t *ctx, dbtype_t *node, dbtype_t *key, dbtype_t **valout)
     }
 
     if (valout) *valout = GET(node->value);
+    rcufree(node);
+
     if (!left) return right;
     if (!right) return left;
     right = delete_min(ctx, right, &min);
@@ -273,6 +284,8 @@ _bonsai_delete_index(pgctx_t *ctx, dbtype_t *node, int index, dbtype_t **valout)
         return balance(ctx, node, left, _bonsai_delete_index(ctx, right, index-(sz+1), valout), subtree_right, 1);
 
     if (valout) *valout = GET(node->value);
+    rcufree(node);
+
     if (!left) return right;
     if (!right) return left;
     right = delete_min(ctx, right, &min);
@@ -314,6 +327,8 @@ bonsai_delete_value(pgctx_t *ctx, dbtype_t *node, dbtype_t *value)
 
     cmp = dbcmp(ctx, value, GET(node->value));
     if (cmp == 0) {
+        // FIXME: is this the correct place to put the free?
+        rcufree(node);
         if (!left) return right;
         if (!right) return left;
         right = delete_min(ctx, right, &min);

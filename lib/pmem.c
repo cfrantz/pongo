@@ -444,6 +444,53 @@ void pmem_gc_mark(memblock_t *base)
 	memcpy(bitmark, bitmap, nbitmap*sizeof(uint64_t));
 }
 
+void pmem_gc_suggest(memblock_t *base, void *addr)
+{
+	uint32_t *memsize = (uint32_t*)( (uint8_t*)base + base->pg_size );
+	// Compute the number of words used for accounting, then
+	// figure out the first usable page after the accounting data.
+	uint32_t total = base->pg_size * base->pg_count;
+	uint32_t pgpool = base->pg_count;
+	uint64_t nbitmap = total / (SMALLEST_ALLOC * 64);
+	uint32_t allocwords_page = base->pg_size / (SMALLEST_ALLOC*64);
+	uint64_t *bitmap = (uint64_t*)(memsize + pgpool);
+	uint64_t *bitmark = bitmap + nbitmap;
+	uint32_t offset, page, size, block;
+	uint64_t mark, mask;
+	uint32_t oldval, newval;
+
+	if (!addr)
+		return;
+
+	// We assume exclusive access to memsize[] and bitmark[] because:
+	//    If you're using the GC, you can't use free
+	//    There will only be one GC running
+	//    If the memsize element has a size, alloc won't interfere with it.
+	// TODO: investigate making the GC and free be safe together
+
+	offset = (uint8_t*)addr - (uint8_t*)base;
+	page = offset / base->pg_size;
+	size = PM_SIZE(memsize[page]);
+	if (size == 1) {
+		log_error("pmem_gc_keep: address %p is in a continuation\n", addr);
+		abort();
+	} else if (size >= base->pg_size) {
+		oldval = memsize[page];
+		newval = PM_GUARD_INC(oldval) | PM_GC_MARK;
+		memsize[page] = newval;
+	} else {
+		// Compute which sub-block we're in
+		block = (offset % base->pg_size) / size;
+
+		// Set the bit in the bitmap
+		offset = page * allocwords_page + block/64;
+		mask = 1ULL << (block % 64);
+		do {
+			mark = bitmark[offset];
+		} while(!cmpxchg64(&bitmark[offset], mark, mark | mask));
+	}
+}
+
 void pmem_gc_keep(memblock_t *base, void *addr)
 {
 	uint32_t *memsize = (uint32_t*)( (uint8_t*)base + base->pg_size );
@@ -456,7 +503,7 @@ void pmem_gc_keep(memblock_t *base, void *addr)
 	uint64_t *bitmap = (uint64_t*)(memsize + pgpool);
 	uint64_t *bitmark = bitmap + nbitmap;
 	uint32_t offset, page, size, block;
-	uint64_t mask;
+	uint64_t mark, mask;
 	uint32_t oldval, newval;
 
 	if (!addr)
@@ -485,8 +532,9 @@ void pmem_gc_keep(memblock_t *base, void *addr)
 		// Clear the bit in the bitmap
 		offset = page * allocwords_page + block/64;
 		mask = 1ULL << (block % 64);
-
-		bitmark[offset] &= ~mask;
+		do {
+			mark = bitmark[offset];
+		} while(!cmpxchg64(&bitmark[offset], mark, mark & ~mask));
 	}
 }
 
@@ -502,7 +550,7 @@ void pmem_gc_free(memblock_t *base, gcfreecb_t gc_free_cb, void *user)
 	uint32_t allocwords_page = base->pg_size / (SMALLEST_ALLOC*64);
 	uint64_t *bitmap = (uint64_t*)(memsize + pgpool);
 	uint64_t *bitmark = bitmap + nbitmap;
-	uint64_t a, oldval, newval;
+	uint64_t a, oldval, newval, mark;
 	int i, j, page, spi, size;
 	uint32_t msval;
 	void *addr;
@@ -540,10 +588,16 @@ void pmem_gc_free(memblock_t *base, gcfreecb_t gc_free_cb, void *user)
 		page = i / allocwords_page;
 		msval = memsize[page];
 		size = PM_SIZE(msval);
+		// use cmpxchg here because we may be competing with
+		// pmem_gc_suggest
+		do {
+			mark = bitmark[i];
+		} while(!cmpxchg64(&bitmark[i], mark, 0));
+
 		// First check if we need to call gc_free_cb for anything
-		if (gc_free_cb && bitmark[i]) {
+		if (gc_free_cb && mark) {
 			for(j=0; j<64; j++) {
-				if (bitmark[i] & (1ULL<<j)) {
+				if (mark & (1ULL<<j)) {
 					addr = (uint8_t*)base + (base->pg_size*page +
 					       size*((i%allocwords_page)*64+j));
 					gc_free_cb(user, addr);
@@ -555,7 +609,7 @@ void pmem_gc_free(memblock_t *base, gcfreecb_t gc_free_cb, void *user)
 		// Clear all the bits set in the bitmark array
 		do {
 			oldval = bitmap[i];
-			newval = oldval & ~bitmark[i];
+			newval = oldval & ~mark;
 		} while(!cmpxchg64(&bitmap[i], oldval, newval));
 
 		// Do we have allocations in this page?
@@ -563,7 +617,7 @@ void pmem_gc_free(memblock_t *base, gcfreecb_t gc_free_cb, void *user)
 
 		// If we had frees in this suballoction, clear the
 		// subpagefull flag in the memsize array
-		if (bitmark[i]) {
+		if (mark) {
 			// this cmpxchg probably can't fail because PM_SUBPAGEFULL will
 			// keep the allocator away from this page
 			if (msval & PM_SUBPAGEFULL)
@@ -584,12 +638,14 @@ void pmem_gc_free(memblock_t *base, gcfreecb_t gc_free_cb, void *user)
 					spi = ntz(size) - 4;
 					if (base->mb_subpool[spi] == -1)
 						base->mb_subpool[spi] = 0;
+/*
 					if (base->mb_lfp == -1)
 						base->mb_lfp = i;
 					// ok for this cmpxchg to fail.  If suballoc is
 					// doing an allocation, failing this cmpxchg will prevent
 					// us from freeing a page we don't want to free.
 					cmpxchg32(&memsize[page], msval, PM_GUARD_INC(msval)&PM_GUARD);
+*/
 				}
 			} else {
 				a = 0;

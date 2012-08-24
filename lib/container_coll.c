@@ -54,7 +54,7 @@ dbtype_t *dbcollection_new(pgctx_t *ctx)
 
 int dbcollection_setitem(pgctx_t *ctx, dbtype_t *obj, dbtype_t *key, dbtype_t *value, int sync)
 {
-    dbtype_t *node, *newnode;
+    dbtype_t *node, *newnode = NULL;
     assert(obj->type == Collection);
 
     if (sync & PUT_ID) {
@@ -65,10 +65,12 @@ int dbcollection_setitem(pgctx_t *ctx, dbtype_t *obj, dbtype_t *key, dbtype_t *v
     do {
         // Read-Copy-Update loop for safe modify
         node = _ptr(ctx, obj->obj);
+        dbfree(ctx, newnode);
         newnode = bonsai_insert(ctx, node, key, value, sync & SET_OR_FAIL);
         if (newnode == BONSAI_ERROR)
             return -1;
     } while(!synchronize(ctx, sync & SYNC_MASK, &obj->obj, node, newnode));
+    dbfree(ctx, node);
     return 0;
 }
 
@@ -99,15 +101,17 @@ int dbcollection_update(pgctx_t *ctx, dbtype_t *obj, int n, updatecb_t elem, voi
 
 int dbcollection_delitem(pgctx_t *ctx, dbtype_t *obj, dbtype_t *key, dbtype_t **value, int sync)
 {
-    dbtype_t *node, *newnode;
+    dbtype_t *node, *newnode=NULL;
     assert(obj->type == Collection);
     // Read-Copy-Update loop for safe modify
     do {
         node = _ptr(ctx, obj->obj);
+        dbfree(ctx, newnode);
         newnode = bonsai_delete(ctx, node, key, value);
         if (newnode == BONSAI_ERROR)
             return -1;
     } while(!synchronize(ctx, sync, &obj->obj, node, newnode));
+    dbfree(ctx, node);
     return 0;
 }
 

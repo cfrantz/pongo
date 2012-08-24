@@ -41,7 +41,7 @@ extern void dbunlock(pgctx_t *ctx);
 extern void *dballoc(pgctx_t *ctx, int size);
 extern void dbfree(pgctx_t *ctx, void *addr);
 extern int dbsize(pgctx_t *ctx, void *addr);
-extern int db_gc(pgctx_t *ctx, gcstats_t *stats);
+extern int db_gc(pgctx_t *ctx, int complete, gcstats_t *stats);
 
 static inline int synchronize(pgctx_t *ctx, int sync, uint64_t *ptr, void *oldval, void *newval)
 {

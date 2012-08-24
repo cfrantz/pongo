@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <pongo/dbmem.h>
+#include <pongo/misc.h>
 #include <pongo/log.h>
 
 int
@@ -20,13 +21,17 @@ int
 main(int argc, char *argv[])
 {
     int i;
-    int interval = 5;
+    unsigned long_interval = 60000000;
+    unsigned short_interval = 250000;
     char *dbfile = NULL;
+    int64_t t0, t1;
     pgctx_t *ctx;
 
     for(i=1; i<argc; i++) {
-        if (!strcmp(argv[i], "-i")) {
-            interval = strtol(argv[++i], 0, 0);
+        if (!strcmp(argv[i], "-l")) {
+            long_interval = atof(argv[++i]) * 1e6;
+        } else if (!strcmp(argv[i], "-s")) {
+            short_interval = atof(argv[++i]) * 1e6;
         } else if (!strcmp(argv[i], "-f")) {
             dbfile = argv[++i];
         } else {
@@ -38,9 +43,19 @@ main(int argc, char *argv[])
 
     log_init(NULL, LOG_DEBUG);
     ctx = dbfile_open(dbfile, 0);
+    t0 = utime_now();
     for(;;) {
-        db_gc(ctx, NULL);
-        sleep(interval);
+        usleep(short_interval);
+        t1 = utime_now();
+        if (ctx->nr_mb != ctx->root->nr_mb) {
+            dbfile_resize(ctx);
+        }
+        if (t1-t0 < long_interval) {
+            db_gc(ctx, 0, NULL);
+        } else {
+            db_gc(ctx, 1, NULL);
+            t0 = utime_now();
+        }
     }
     return 0;
 }

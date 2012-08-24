@@ -469,15 +469,16 @@ pongo_gc(PyObject *self, PyObject *args)
     gcstats_t _stats;
     gcstats_t *stats = &_stats;
     int getstats = 1;
+    int complete = 0;
 
-    if (!PyArg_ParseTuple(args, "O|i:gc", &data, &getstats))
+    if (!PyArg_ParseTuple(args, "O|ii:gc", &data, &complete, &getstats))
         return NULL;
     if (pongo_check(data))
         return NULL;
 
     memset(stats, 0, sizeof(*stats));
     if (!getstats) stats = NULL;
-    db_gc(data->ctx, stats);
+    db_gc(data->ctx, complete, stats);
     if (stats) {
         ret = Py_BuildValue("(iiii)",
                 stats->before.num, stats->before.size,

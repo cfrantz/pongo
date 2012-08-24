@@ -40,6 +40,7 @@ extern void pfree(memblock_t *base, void *addr);
 extern int psize(memblock_t *base, void *addr);
 
 extern void pmem_gc_mark(memblock_t *base);
+extern void pmem_gc_suggest(memblock_t *base, void *addr);
 extern void pmem_gc_keep(memblock_t *base, void *addr);
 typedef void (*gcfreecb_t)(void *user, void *addr);
 extern void pmem_gc_free(memblock_t *base, gcfreecb_t gc_free_cb, void *user);

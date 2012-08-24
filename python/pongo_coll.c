@@ -33,7 +33,6 @@ PongoCollection_GetItem(PongoCollection *self, PyObject *key)
         if (dbcollection_getitem(SELF_CTX_AND_DBCOLL, k, &v) == 0) {
             ret = to_python(self->ctx, v, 1);
         } else {
-            dbfree(self->ctx, k);
             PyErr_SetObject(PyExc_KeyError, key);
         }
     }
@@ -57,7 +56,6 @@ PongoCollection_SetItem(PongoCollection *self, PyObject *key, PyObject *value)
             } else {
                 PyErr_SetObject(PyExc_KeyError, key);
             }
-            dbfree(self->ctx, k);
         } else {
             v = from_python(self->ctx, value);
             if (!PyErr_Occurred() && dbcollection_setitem(SELF_CTX_AND_DBCOLL, k, v, self->ctx->sync) == 0)
@@ -216,7 +214,6 @@ PongoCollection_pop(PongoCollection *self, PyObject *args, PyObject *kwargs)
     k = from_python(self->ctx, key);
     if (!PyErr_Occurred()) {
         if (dbcollection_delitem(SELF_CTX_AND_DBCOLL, k, &v, sync) < 0) {
-            dbfree(self->ctx, k);
             if (dflt) {
                 Py_INCREF(dflt);
                 ret = dflt;

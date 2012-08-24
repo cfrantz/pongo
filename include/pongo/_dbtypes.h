@@ -38,7 +38,7 @@ typedef struct _dbroot {
 	uint64_t cache;				// 144	+8 bytes
 	uint64_t booleans[2];			// 152	+16 bytes
 	uint32_t lock;				// 168  +4 bytes
-	uint32_t resize_lock;			// 172  +4 bytes
+	uint32_t nr_mb; 			// 172  +4 bytes
 	struct {
 		int64_t gc_time;
 		int64_t gc_pid;
@@ -101,6 +101,7 @@ typedef struct {
 	dbtag_t type;
 	uint32_t _pad;
 	uint64_t list;
+    uint8_t _extra[48];
 } dblist_t;
 
 typedef struct  {
@@ -118,26 +119,29 @@ typedef struct {
 	dbtag_t type;
 	uint32_t _pad;
 	uint64_t obj;
+    uint8_t _extra[48];
 } dbobject_t;
 
 typedef struct {
 	dbtag_t type;
 	uint32_t refcnt; // used only by pidcache
 	uint64_t obj;
+    uint8_t _extra[48];
 } dbcollection_t;
 
 typedef struct {
 	dbtag_t type;
 	uint32_t _pad;
 	uint64_t cache;
+    uint8_t _extra[48];
 } dbcache_t;
 
 typedef struct {
 	dbtag_t type;
 	uint32_t _pad;
+	uint64_t size;
 	uint64_t left, right;
 	uint64_t key, value;
-	uint64_t size;
 } dbnode_t;
 
 #if 0
@@ -169,9 +173,9 @@ typedef struct {
 				uint64_t list;
 				uint64_t cache;
 				struct {
+					uint64_t size;
 					uint64_t left, right;
 					uint64_t key, value;
-					uint64_t size;
 				};
 			};
 		};

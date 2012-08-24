@@ -55,7 +55,6 @@ PongoDict_SetItem(PongoDict *self, PyObject *key, PyObject *value)
             } else {
                 PyErr_SetObject(PyExc_KeyError, key);
             }
-            dbfree(self->ctx, k);
         } else {
             v = from_python(self->ctx, value);
             if (!PyErr_Occurred() && dbobject_setitem(SELF_CTX_AND_DBOBJ, k, v, self->ctx->sync) == 0)
@@ -214,7 +213,6 @@ PongoDict_pop(PongoDict *self, PyObject *args, PyObject *kwargs)
     k = from_python(self->ctx, key);
     if (!PyErr_Occurred()) {
         if (dbobject_delitem(SELF_CTX_AND_DBOBJ, k, &v, sync) < 0) {
-            dbfree(self->ctx, k);
             if (dflt) {
                 Py_INCREF(dflt);
                 ret = dflt;

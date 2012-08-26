@@ -1,10 +1,5 @@
-#include <time.h>
 #include <math.h>
 #include <pongo/misc.h>
-#ifdef WIN32
-#include <windows.h>
-#endif
-
 
 #ifndef WIN32
 int64_t utime_now(void)
@@ -15,6 +10,13 @@ int64_t utime_now(void)
     clock_gettime(CLOCK_REALTIME, &tm);
     now = tm.tv_sec * 1000000LL + tm.tv_nsec/1000;
     return now;
+}
+
+int gettid(void)
+{
+    int tid;
+    tid = syscall(SYS_gettid);
+    return tid;
 }
 #else
 int getpid(void)

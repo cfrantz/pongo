@@ -40,40 +40,9 @@ typedef struct _mmfile {
 #endif
 	int nmap;
 	mmap_t *map;
+	mmap_t *map_offset;
 	uint64_t size;
 } mmfile_t;
-
-/*
- * Given a pointer in a mmap region, return the mapping to which it belongs
- */
-static inline int __ptr_map(mmfile_t *mm, void *ptr)
-{
-	int i;
-	mmap_t *map;
-	if (!ptr) return 0;
-	for(i=0, map=mm->map; i<mm->nmap; i++, map++) {
-		if ((uint8_t*)ptr >= (uint8_t*)map->ptr &&
-		    (uint8_t*)ptr <  (uint8_t*)map->ptr + map->size)
-			return i;
-	}
-	return -1;
-}
-
-/*
- * Given an offset in a mmap file, return the mapping to which it belongs
- */
-static inline int __offset_map(mmfile_t *mm, uint64_t offset)
-{
-	int i;
-	mmap_t *map;
-	for(i=0, map=mm->map; i<mm->nmap; i++, map++) {
-		if (offset >= map->offset &&
-		    offset <  map->offset + map->size)
-			return i;
-	}
-	return -1;
-}
-
 #define MLCK_RD		0x0001		// Reader lock
 #define MLCK_WR		0x0002		// Writer lock
 #define MLCK_UN		0x0004		// Unlock
@@ -86,5 +55,82 @@ int mm_sync(mmfile_t *mm);
 int mm_resize(mmfile_t *mm, uint64_t newsize);
 int mm_lock(mmfile_t *mm, uint32_t flags, uint64_t offset, uint64_t len);
 uint64_t mm_size(mmfile_t *mm);
+
+/*
+ * Given a pointer in a mmap region, return the mapping to which it belongs
+ */
+static inline mmap_t *__mm_ptr(mmfile_t *mm, void *ptr)
+{
+	int imin, imid, imax;
+	mmap_t *map;
+	if (!ptr) return 0;
+	
+	imin = 0;
+	imax = mm->nmap-1;
+	while(imax >= imin) {
+		imid = imin + (imax-imin)/2;
+		map = &mm->map[imid];
+		if ((uint8_t*)ptr < (uint8_t*)map->ptr) {
+			imax = imid-1;
+		} else if ((uint8_t*)ptr >= (uint8_t*)map->ptr + map->size) {
+			imin = imid+1;
+		} else {
+			return map;
+		}
+	}
+	assert(ptr == (void*)"Invalid Pointer");
+	return NULL;
+}
+
+/*
+ * Given an offset in a mmap file, return the mapping to which it belongs
+ */
+static inline mmap_t *__mm_offset(mmfile_t *mm, uint64_t offset)
+{
+	int imin, imid, imax;
+	mmap_t *map;
+	uint64_t nsz;
+	
+again:
+	imin = 0;
+	imax = mm->nmap-1;
+	while(imax >= imin) {
+		imid = imin + (imax-imin)/2;
+		map = &mm->map_offset[imid];
+		if (offset < map->offset) {
+			imax = imid-1;
+		} else if (offset >= map->offset + map->size) {
+			imin = imid+1;
+		} else {
+			return map;
+		}
+	}
+
+	// Check if the file has been resized
+	nsz = mm_size(mm);
+	if (offset < nsz) {
+		// FIXME
+		mm_resize(mm, nsz);
+		goto again;
+	}
+	assert(offset == (long)"Invalid offset");
+	return NULL;
+}
+
+// Given a pointer in a mmap file, return it's 64-bit offset
+static inline uint64_t __offset(mmfile_t *mm, void *ptr)
+{
+	mmap_t *m = __mm_ptr(mm, ptr);
+	return m->offset + ((uint8_t*)ptr - (uint8_t*)m->ptr);
+}
+
+// Given an offset in a mmap file, return its pointer
+static inline void *__ptr(mmfile_t *mm, uint64_t offset)
+{
+	mmap_t *m;
+	if (!offset) return NULL;
+	m = __mm_offset(mm, offset);
+	return m->ptr + (offset - m->offset);
+}
 
 #endif

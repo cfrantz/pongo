@@ -1,12 +1,13 @@
 # Pongo Makefile
 #
 
-SRCS=dbmem.c dbtypes.c log.c mmfile.c pmem.c misc.c json.c bonsai.c pidcache.c \
-     container_list.c \
-     container_obj.c \
-     container_coll.c \
-     container_cache.c \
-     container_ops.c 
+#SRCS=dbmem.c dbtypes.c log.c mmfile.c pmem.c misc.c json.c bonsai.c pidcache.c \
+#     container_list.c \
+#     container_obj.c \
+#     container_coll.c \
+#     container_cache.c \
+#     container_ops.c 
+SRCS=log.c mmfile.c pmem.c misc.c 
 
 OBJS = $(SRCS:.c=.o)
 
@@ -29,5 +30,5 @@ depend:
 	$(CC) -E -MM $(INCLUDE) $(ALLSRC) > .depend
 
 clean:
-	find . -name "*.[oas]" | xargs rm
-	find . -name "*.gcno" | xargs rm
+	find . -name "*.[oas]" | xargs rm -f
+	find . -name "*.gc*" | xargs rm -f

@@ -2,51 +2,105 @@
 #define PMEM_H
 
 #include <pongo/stdtypes.h>
+#include <pongo/mmfile.h>
 
+#define offsetof(st, el)  ((uintptr_t)(&((st*)0)->el))
 #define PMEM_LOCKFREE 1
 #define PAGE_SIZE (4096)
 #define SMALLEST_ALLOC (16)
+#define NR_SZCLS 6
 
-#define MEMBLOCK_HEAD \
-	uint8_t signature[16]; \
-	uint64_t pg_size; \
-	uint64_t pg_count; \
-	uint64_t mb_offset; \
-	uint64_t mb_size; \
-	int32_t mb_lfp; \
-	int32_t mb_subpool[8]; \
-	uint8_t mb_reserved[128 - (16 + 4*sizeof(uint64_t) + 9*sizeof(int32_t))];
+typedef struct _pdescriptor {
+	union {
+		struct {
+			uint32_t s_ofs, e_ofs;
+		};
+		uint64_t all;
+	};
+} pdescr_t;
+		
+typedef struct _mempool {
+	uint64_t next;
+	uint32_t size;
+	uint8_t __pad[64-(sizeof(uint64_t)+sizeof(uint32_t))];
+	volatile pdescr_t desc[1];
+} mempool_t;
 
-struct _memblock_head {
-	MEMBLOCK_HEAD
-};
+typedef struct _poolblock {
+	uint64_t next;
+	uint32_t size;
+	uint32_t
+		type:	1,
+		alloc:	1,
+		gc:	1,
+		pool:	29;
+} poolblock_t;
 
 typedef struct _memblock {
-	MEMBLOCK_HEAD
-	uint8_t _pad[PAGE_SIZE - sizeof(struct _memblock_head)];
+	uint32_t sbofs;
+	uint16_t next;
+	uint16_t
+		type:	1,
+		alloc:	1,
+		gc:	1,
+		_resv:  13;
 } memblock_t;
 
-#define PM_FLAG_MASK	0xF
-#define PM_CONTINUATION	0x1
-#define PM_SUBPAGEFULL	0x2
-#define PM_GC_MARK	0x4
-#define PM_RESERVED	0x8
-#define PM_GUARD	0xFF000000
-#define PM_SIZE(x)	( (x) & 0x00FFFFF0)
-#define PM_GUARD_INC(x) ( (x) + 0x01000000 )
+typedef union _bdescr { 
+		struct {
+			uint16_t free;
+			uint16_t count;
+			uint16_t size;
+			uint16_t tag;
+		};
+		uint64_t all;
+} bdescr_t;
 
-extern void *palloc(memblock_t *base, unsigned size);
-extern void pfree(memblock_t *base, void *addr);
-extern int psize(memblock_t *base, void *addr);
+typedef struct _superblock {
+	uint64_t next;
+	volatile bdescr_t desc;
+	uint32_t size, total;
+	uint32_t _xxx;
+	uint32_t gc :1,
+		_resv: 31;
+	uint8_t _pad[64 - (4*sizeof(uint64_t))];
+} superblock_t;
 
-extern void pmem_gc_mark(memblock_t *base);
-extern void pmem_gc_suggest(memblock_t *base, void *addr);
-extern void pmem_gc_keep(memblock_t *base, void *addr);
-typedef void (*gcfreecb_t)(void *user, void *addr);
-extern void pmem_gc_free(memblock_t *base, gcfreecb_t gc_free_cb, void *user);
+typedef struct _mlist {
+	uint64_t freelist;
+	uint64_t fulllist;
+} mlist_t;
 
-typedef void (*pmemcb_t)(void *addr, int size, void *data);
-extern void pmem_foreach(memblock_t *base, pmemcb_t func, void *data);
-extern void pmem_info(memblock_t *base);
+typedef struct _procheap {
+	int64_t last_used;
+	uint64_t id;
+	mlist_t szcls[NR_SZCLS];
+	uint8_t _pad[128 - (6*sizeof(mlist_t)+2*sizeof(uint64_t))];
+} procheap_t;
+
+typedef struct _memheap {
+	uint64_t nr_procheap;
+	mlist_t pool;
+	uint8_t _pad0[64-2*sizeof(uint64_t)];
+	uint64_t pool_alloc;
+	uint8_t _pad1[64-sizeof(uint64_t)];
+	procheap_t procheap[];
+} memheap_t;
+
+
+extern void *(*pmem_more_memory)(mmfile_t *mm, uint32_t *size);
+extern mempool_t *pmem_pool_init(void *addr, uint32_t size);
+extern void *pmem_pool_alloc(mempool_t *pool, uint32_t size);
+extern int pmem_pool_free(void *addr);
+extern void pmem_pool_print(mempool_t *pool);
+
+extern superblock_t *pmem_sb_init(mempool_t *pool, uint32_t blksz, uint32_t count);
+extern void *pmem_sb_alloc(superblock_t *sb);
+extern void pmem_sb_free(superblock_t *sb, void *addr);
+
+extern void *pmem_alloc(mmfile_t *mm, memheap_t *heap, uint32_t sz);
+extern void pmem_gc_mark(mmfile_t *mm, memheap_t *heap);
+extern void pmem_gc_suggest(void *addr);
+extern void pmem_gc_free(mmfile_t *mm, memheap_t *heap, int fast);
 
 #endif

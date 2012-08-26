@@ -16,14 +16,37 @@
 
 void _addmap(mmfile_t *mm, void *ptr, uint64_t offset, uint64_t size)
 {
-	int n;
-	if (mm->nmap % 16 == 0)
+	int i, n;
+
+	// The map lists are allocated in chunks of 16 slots
+	if (mm->nmap % 16 == 0) {
 		mm->map = realloc(mm->map, sizeof(mmap_t)*(16+mm->nmap));
-	assert(mm->map);
+		mm->map_offset = realloc(mm->map_offset, sizeof(mmap_t)*(16+mm->nmap));
+	}
+	assert(mm->map && mm->map_offset);
 	n = mm->nmap++;
-	mm->map[n].ptr = ptr;
-	mm->map[n].offset = offset;
-	mm->map[n].size = size;
+
+	// We keep the "map" list sorted by pointer
+	for(i=0; i<n; i++) {
+		if (ptr < mm->map[i].ptr) {
+			memmove(&mm->map[i+1], &mm->map[i], (n-i)*sizeof(mmap_t));
+			mm->map[i].ptr = ptr;
+			mm->map[i].offset = offset;
+			mm->map[i].size = size;
+		}
+	}
+	if (i == n) {
+		mm->map[n].ptr = ptr;
+		mm->map[n].offset = offset;
+		mm->map[n].size = size;
+	}
+
+	// The map_offset list is sorted by offset.  We assume that
+	// offset is always increasing (no mapping files with holes
+	// in the middle)
+	mm->map_offset[n].ptr = ptr;
+	mm->map_offset[n].offset = offset;
+	mm->map_offset[n].size = size;
 }
 
 uint64_t mm_size(mmfile_t *mm)

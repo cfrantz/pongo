@@ -3,7 +3,12 @@
 
 #include <time.h>
 #ifndef WIN32
+#define _GNU_SOURCE
 #include <unistd.h>
+#include <sys/syscall.h>
+#include <sys/types.h>
+#else
+#include <windows.h>
 #endif
 #include <pongo/stdtypes.h>
 

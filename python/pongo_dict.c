@@ -436,7 +436,9 @@ PongoDict_repr(PyObject *ob)
 void PongoDict_Del(PyObject *ob)
 {
     PongoDict *self = (PongoDict*)ob;
+    dblock(self->ctx);
     pidcache_del(self->ctx, self);
+    dbunlock(self->ctx);
     PyObject_Del(ob);
 }
 

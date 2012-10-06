@@ -31,20 +31,21 @@ typedef enum {
 
 #define DBROOT_SIG "PongoDB"
 typedef struct _dbroot {
-	MEMBLOCK_HEAD				// 0 to 128 bytes
-	uint32_t _pad0;				// 128  +4 bytes
-	uint32_t version;			// 132  +4 bytes
-	uint64_t data;				// 136  +8 bytes
-	uint64_t cache;				// 144	+8 bytes
-	uint64_t booleans[2];			// 152	+16 bytes
-	uint32_t lock;				// 168  +4 bytes
-	uint32_t nr_mb; 			// 172  +4 bytes
+    uint8_t signature[16];      // 0    +16 bytes
+    uint16_t version[4];        // 16   +8 bytes
+    uint64_t _pad0;             // 24   +8 bytes
+	uint64_t heap;				// 32   +8 bytes
+	uint64_t data;				// 40   +8 bytes
+	uint64_t cache;				// 48	+8 bytes
+	uint64_t pidcache;			// 56   +8 bytes
+	uint64_t booleans[2];		// 64	+16 bytes
+	uint64_t lock;				// 80   +8 bytes
+	uint64_t resize; 	        // 88   +8 bytes
 	struct {
 		int64_t gc_time;
 		int64_t gc_pid;
-	} gc;					// 176  +16 bytes
-	uint64_t pidcache;			// 192  +8 bytes
-	uint8_t _pad1[3072-200];		// 200
+	} gc;                       // 96  +16 bytes
+	uint8_t _pad1[3072-112];	// 112
 	struct __meta {
 		uint64_t chunksize;		// 3072 + 8 bytes
 		uint64_t id;			// 3080 + 8 bytes
@@ -170,8 +171,8 @@ typedef struct {
 				int64_t ival;
 				int64_t utctime;
 				double fval;
-				uint64_t list;
-				uint64_t cache;
+				volatile uint64_t list;
+				volatile uint64_t cache;
 				struct {
 					uint64_t size;
 					uint64_t left, right;
@@ -189,9 +190,9 @@ typedef struct {
 			uint8_t uuval[16];
 		};
 		struct {
-			uint32_t refcnt; // used only by pidcache.  _pad for everyone else
+			volatile uint32_t refcnt; // used only by pidcache.  _pad for everyone else
 			union {
-				uint64_t obj;
+				volatile uint64_t obj;
 			};
 		};
 	};

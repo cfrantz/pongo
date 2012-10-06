@@ -286,7 +286,9 @@ pongo_open(PyObject *self, PyObject *args)
         return NULL;
 
     ctx = dbfile_open(filename, initsize);
+    dblock(ctx);
     pidcache_new(ctx);
+    dbunlock(ctx);
     // Create a python proxy of the root data object
     return PongoCollection_Proxy(ctx, ctx->data);
 }
@@ -333,6 +335,7 @@ pongo_meta(PyObject *self, PyObject *args)
         return NULL;
 
     ctx = data->ctx;
+    dblock(ctx);
     if (!strcmp(key, "chunksize")) {
         ret = PyLong_FromLongLong(ctx->root->meta.chunksize);
         if (value && value != Py_None) ctx->root->meta.chunksize = PyInt_AsLong(value);
@@ -368,6 +371,7 @@ pongo_meta(PyObject *self, PyObject *args)
         PyErr_Format(PyExc_Exception, "Unknown meta key %s", key);
         ret = NULL;
     }
+    dbunlock(ctx);
 
     return ret;
 }
@@ -419,6 +423,7 @@ pongo_pidcache(PyObject *self, PyObject *args)
 static PyObject *
 pongo__object(PyObject *self, PyObject *args)
 {
+    PyObject *ob;
     PongoCollection *data;
     uint64_t offset;
     dbtype_t *db;
@@ -429,7 +434,10 @@ pongo__object(PyObject *self, PyObject *args)
         return NULL;
 
     db = _ptr(data->ctx, offset);
-    return to_python(data->ctx, db, 1);
+    dblock(data->ctx);
+    ob = to_python(data->ctx, db, 1);
+    dbunlock(data->ctx);
+    return ob;
 }
 
 static PyObject *

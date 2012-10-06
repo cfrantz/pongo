@@ -447,7 +447,9 @@ PongoCollection_repr(PyObject *ob)
 void PongoCollection_Del(PyObject *ob)
 {
     PongoCollection *self = (PongoCollection*)ob;
+    dblock(self->ctx);
     pidcache_del(self->ctx, self);
+    dbunlock(self->ctx);
     PyObject_Del(ob);
 }
 

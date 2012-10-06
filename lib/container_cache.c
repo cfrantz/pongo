@@ -29,12 +29,13 @@ int dbcache_recache(pgctx_t *ctx, int cachesz, int retry)
 
 static dbtype_t *_dbcache_put(pgctx_t *ctx, dbtype_t *cache, dbtype_t *item)
 {
-    dbtype_t *node, *newnode;
+    dbtype_t *node, *newnode = NULL;
 
     if (!cache) return item;
     assert(cache->type == Cache);
     do {
         node = _ptr(ctx, cache->cache);
+        rculoser(ctx, newnode);
         // We're really just using the cache here to keep a sorted
         // balanced atom tree, but set the value as well so we can
         // pretend its a k-v pair.
@@ -42,6 +43,7 @@ static dbtype_t *_dbcache_put(pgctx_t *ctx, dbtype_t *cache, dbtype_t *item)
         if (newnode == BONSAI_ERROR)
             return NULL;
     } while(!synchronize(ctx, 0, &cache->cache, node, newnode));
+    rcuwinner(ctx, node);
     return item;
 }
 
@@ -77,7 +79,7 @@ dbtype_t *dbcache_get_str(pgctx_t *ctx, dbtag_t type, const char *sval, int len)
 void dbcache_del(pgctx_t *ctx, dbtype_t *item)
 {
     dbtype_t *cache = ctx->cache;
-    dbtype_t *node, *newnode;
+    dbtype_t *node, *newnode = NULL;
 
     if (!cache) return;
     if (item->type > String) {
@@ -88,10 +90,12 @@ void dbcache_del(pgctx_t *ctx, dbtype_t *item)
     do {
         // Read-Copy-Update loop for modify operations
         node = _ptr(ctx, cache->cache);
+        rculoser(ctx, newnode);
         newnode = bonsai_delete(ctx, node, item, NULL);
         if (newnode == BONSAI_ERROR)
             return ;
     } while(!synchronize(ctx, 0, &cache->cache, node, newnode));
+    rcuwinner(ctx, node);
 }
 /*
  * vim: ts=4 sts=4 sw=4 expandtab:

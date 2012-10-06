@@ -11,7 +11,8 @@
 #include <pongo/log.h>
 #include <pongo/errors.h>
 
-#define MMAP_SUGGEST (void*)0x10000000
+static void *suggest = (void*)0x100000000;
+#define MMAP_SUGGEST (suggest)
 //#define MMAP_SUGGEST NULL
 
 void _addmap(mmfile_t *mm, void *ptr, uint64_t offset, uint64_t size)
@@ -33,6 +34,7 @@ void _addmap(mmfile_t *mm, void *ptr, uint64_t offset, uint64_t size)
 			mm->map[i].ptr = ptr;
 			mm->map[i].offset = offset;
 			mm->map[i].size = size;
+			break;
 		}
 	}
 	if (i == n) {
@@ -89,6 +91,7 @@ int mm_open(mmfile_t *mm, const char *filename, int initsize)
 	mm->fd = fd;
 	_addmap(mm, ptr, 0, file.st_size);
 	mm->size = file.st_size;
+	suggest += mm->size;
 	return 0;
 }
 
@@ -120,7 +123,7 @@ int mm_resize(mmfile_t *mm, uint64_t newsize)
 		}
 
 		n = mm->nmap - 1;
-		chunkofs = mm->map[n].offset + mm->map[n].size;
+		chunkofs = mm->map_offset[n].offset + mm->map_offset[n].size;
 		chunksz = newsize - chunkofs;
 		ptr = mmap(MMAP_SUGGEST, chunksz, PROT_READ|PROT_WRITE, MAP_SHARED, mm->fd, chunkofs);
 		if (ptr == MAP_FAILED) {
@@ -130,6 +133,7 @@ int mm_resize(mmfile_t *mm, uint64_t newsize)
 		}
 		_addmap(mm, ptr, chunkofs, chunksz);
 		mm->size = newsize;
+		suggest += chunksz;
 	}
 	return 0;
 }

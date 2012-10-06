@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pongo/stdtypes.h>
@@ -19,12 +20,14 @@
 #define NR_CHUNKS(sz) ((65536-80)/(8+sz))
 
 void *(*pmem_more_memory)(mmfile_t *mm, uint32_t *size);
+uint8_t free_pattern;
 
 mempool_t *pmem_pool_init(void *addr, uint32_t size)
 {
     mempool_t *pool = (mempool_t*)addr;
 
     memset(pool, 0, size);
+    pool->signature = SIG_MEMPOOL;
     pool->next = 0;
     pool->size = size;
     pool->desc[0].s_ofs = offsetof(mempool_t, desc[1]);
@@ -36,7 +39,7 @@ void *pmem_pool_alloc(mempool_t *pool, uint32_t size)
 {
     unsigned p, i, n, sz, psz;
     pdescr_t desc, newdesc;
-    uint64_t *ret;
+    uint8_t *ret;
     poolblock_t *pb;
 
     // Add 2 64-bit words to hold the alloation size and a linked
@@ -63,7 +66,7 @@ void *pmem_pool_alloc(mempool_t *pool, uint32_t size)
 
         newdesc = desc;
         newdesc.e_ofs -= size;
-        ret = (uint64_t*)((uint8_t*)pool + newdesc.e_ofs);
+        ret = ((uint8_t*)pool + newdesc.e_ofs);
         if (newdesc.e_ofs - newdesc.s_ofs < SMALLEST_POOL_ALLOC) {
             // if we would cut the block into an unusable chunk,
             // then just claim the whole thing.
@@ -73,17 +76,21 @@ void *pmem_pool_alloc(mempool_t *pool, uint32_t size)
         }
     } while (!cmpxchg64(&pool->desc[p], desc.all, newdesc.all));
 
-    assert((newdesc.e_ofs & 7) == 0);
-    pb = (poolblock_t*)ret;
-    // The first word is the linked list pointer, the second is
-    // the allocation size
-    pb->next = 0;
-    pb->size = size;
-    pb->type = 0;
-    pb->alloc = 1;
-    pb->gc = 0;
-    pb->pool = newdesc.e_ofs >> 3;
-    return (void*)(pb+1);
+    if (ret) {
+        assert((newdesc.e_ofs & 7) == 0);
+        memset(ret, 0, size);
+        pb = (poolblock_t*)ret;
+        // The first word is the linked list pointer, the second is
+        // the allocation size
+        pb->next = 0;
+        pb->size = size;
+        pb->type = 0;
+        pb->alloc = 1;
+        pb->gc = 0;
+        pb->pool = newdesc.e_ofs >> 3;
+        ret = (void*)(pb+1);
+    }
+    return ret;
 }
 
 int pmem_pool_free(void *addr)
@@ -178,6 +185,7 @@ superblock_t *pmem_sb_init(mempool_t *pool, uint32_t blksz, uint32_t count)
     if (!sb)
         return NULL;
 
+    sb->signature = SIG_SUPERBLK;
     sb->next = 0;
     p = (uint8_t*)(sb+1);
     // Chain all of the smaller blocks together
@@ -188,6 +196,7 @@ superblock_t *pmem_sb_init(mempool_t *pool, uint32_t blksz, uint32_t count)
         mb->sbofs = (uintptr_t)mb - (uintptr_t)sb;
         mb->type = 1;
         mb->alloc = 0;
+        mb->suggest = 0;
         mb->gc = 0;
         mb->_resv = 0;
     }
@@ -195,6 +204,8 @@ superblock_t *pmem_sb_init(mempool_t *pool, uint32_t blksz, uint32_t count)
     sb->desc.count = count;
     sb->desc.size = blksz;
     sb->desc.tag = 0;
+    sb->size = blksz;
+    sb->total = count;
     return sb;
 }
 
@@ -203,6 +214,7 @@ void *pmem_sb_alloc(superblock_t *sb)
     bdescr_t oldval, newval;
     uint8_t *p = (uint8_t*)(sb+1);
     memblock_t *mb;
+    void *ret;
 
     // pop a block off of the superblock's free list
     do {
@@ -217,8 +229,11 @@ void *pmem_sb_alloc(superblock_t *sb)
         newval.tag++;
     } while(!cmpxchg64(&sb->desc, oldval.all, newval.all));
 
+    assert(mb->alloc == 0);
     mb->alloc = 1;
-    return (void*)(mb+1);
+    ret = (void*)(mb+1);
+    memset(ret, 0, sb->size);
+    return ret;
 }
 
 void pmem_sb_free(superblock_t *sb, void *addr)
@@ -232,9 +247,15 @@ void pmem_sb_free(superblock_t *sb, void *addr)
 
     // push a block back onto the superblock's free list
     mb = (memblock_t*)addr - 1;
+    if (!sb) {
+        sb = (superblock_t*)((uint8_t*)mb - mb->sbofs);
+    }
+    assert(mb->alloc);
+    memset(addr, mb->_resv, sb->size);
     mb->alloc = 0;
     mb->gc = 0;
-    blk = mb - (memblock_t*)(sb+1);
+    mb->suggest = 0;
+    blk = ((uintptr_t)mb - (uintptr_t)(sb+1)) / (sb->size + sizeof(*mb));
     do {
         newval = oldval = sb->desc;
         newval.count++;
@@ -288,15 +309,19 @@ void *pmem_pool_helper(mmfile_t *mm, memheap_t *heap, uint32_t size)
             }
         } else {
             // Try to get more memory
+#if 0
             if (!pmem_more(mm, pool))
                 break;
+#endif
+            pmem_more(mm, &heap->pool);
         }
     }
     return ret;
 }
 
-void *pmem_sb_helper(mmfile_t *mm, memheap_t *heap, volatile mlist_t *memory, uint32_t sz)
+void *pmem_sb_helper(mmfile_t *mm, memheap_t *heap, volatile mlist_t *memory, int cls)
 {
+    uint32_t sz;
     uint64_t freelist;
     superblock_t *sb;
     void *ret = NULL;
@@ -320,65 +345,129 @@ void *pmem_sb_helper(mmfile_t *mm, memheap_t *heap, volatile mlist_t *memory, ui
                 } while(!cmpxchg64(&memory->fulllist, sb->next, freelist));
             }
         } else {
-            // Allocate a new superblock and push it onto the freelist
-            sb = pmem_sb_init(__ptr(mm, heap->pool.freelist), sz, NR_CHUNKS(sz));
+            // First try getting a block from procheap zero.
+            do {
+                freelist = heap->procheap[0].szcls[cls].freelist;
+                sb = __ptr(mm, freelist);
+                if (!sb) break;
+            } while(!cmpxchg64(&heap->procheap[0].szcls[cls].freelist, freelist, sb->next));
+
+            // If there was no block available, allocate one from the pool
+            if (!sb) {
+                sz = 16 << cls;
+                sb = pmem_sb_init(__ptr(mm, heap->pool.freelist), sz, NR_CHUNKS(sz));
+            }
+
             if (sb) {
+                // Got a block, put it onto the freelist
                 do {
                     sb->next = memory->freelist;
                 } while(!cmpxchg64(&memory->freelist, sb->next, __offset(mm, sb)));
             } else {
                 // Try to get more memory
+#if 0
                 if (!pmem_more(mm, &heap->pool))
                     break;
+#endif
+                pmem_more(mm, &heap->pool);
             }
         }
     }
     return ret;
 }
 
-void *pmem_alloc(mmfile_t *mm, memheap_t *heap, uint32_t sz)
+static inline int pmem_heap(memheap_t *heap)
 {
     int ph;
+    int pid = getpid();
+    ph = 1 + pid % (heap->nr_procheap-1);
+//    log_debug("pid %d heap is %d", pid, ph);
+    return ph;
+}
+
+void *pmem_alloc(mmfile_t *mm, memheap_t *heap, uint32_t sz)
+{
+    int ph, cls;
     volatile mlist_t *memory;
     poolblock_t *pb;
     void *ret = NULL;
 
-    ph = gettid() % heap->nr_procheap;
+    ph = pmem_heap(heap);
     if (sz <= 16) {
+        cls = 0;
         sz = 16;
-        memory = &heap->procheap[ph].szcls[0];
     } else if (sz <= 32) {
-        sz = 32;
-        memory = &heap->procheap[ph].szcls[1];
+        cls = 1;
     } else if (sz <= 64) {
-        sz = 64;
-        memory = &heap->procheap[ph].szcls[2];
+        cls = 2;
     } else if (sz <= 128) {
-        sz = 128;
-        memory = &heap->procheap[ph].szcls[3];
+        cls = 3;
     } else if (sz <= 256) {
-        sz = 256;
-        memory = &heap->procheap[ph].szcls[4];
+        cls = 4;
     } else if (sz <= 512) {
-        sz = 512;
-        memory = &heap->procheap[ph].szcls[5];
+        cls = 5;
     } else {
         // Round to nearest kilobyte
         sz = (sz + 0x3FF) & ~0x3FF; 
     }
 
     if (sz <= 512) {
-        ret = pmem_sb_helper(mm, heap, memory, sz);
+        memory = &heap->procheap[ph].szcls[cls];
+        ret = pmem_sb_helper(mm, heap, memory, cls);
     } else {
         ret = pmem_pool_helper(mm, heap, sz);
 
         // Put the block on the allocated list
-        pb = (poolblock_t*)ret;
+        pb = (poolblock_t*)ret-1;
         do {
             pb->next = heap->pool_alloc;
-        } while(!cmpxchg64(&heap->pool_alloc, pb->next, __offset(mm, ret)));
+        } while(!cmpxchg64(&heap->pool_alloc, pb->next, __offset(mm, pb)));
     }
     return ret;
+}
+
+void pmem_retire(mmfile_t *mm, memheap_t *heap)
+{
+    int ph, i;
+    volatile mlist_t *memory, *retire;
+    uint64_t oldval, newval;
+    superblock_t *sb;
+
+    ph = pmem_heap(heap);
+
+    for(i=0; i<NR_SZCLS; i++) {
+        retire = &heap->procheap[0].szcls[i];
+        memory = &heap->procheap[ph].szcls[i];
+        // Grab the freelist off of this pid's procheap
+        // and push each item onto procheap zero.
+        do {
+            oldval = memory->freelist;
+        } while(!cmpxchg64(&memory->freelist, oldval, 0));
+
+        while(oldval) {
+            newval = oldval;
+            sb = __ptr(mm, newval);
+            oldval = sb->next;
+            do {
+                sb->next = retire->freelist;
+            } while(!cmpxchg64(&retire->freelist, sb->next, newval));
+        }
+
+        // Grab the fulllist off of this pid's procheap
+        // and push each item onto procheap zero.
+        do {
+            oldval = memory->fulllist;
+        } while(!cmpxchg64(&memory->fulllist, oldval, 0));
+
+        while(oldval) {
+            newval = oldval;
+            sb = __ptr(mm, newval);
+            oldval = sb->next;
+            do {
+                sb->next = retire->fulllist;
+            } while(!cmpxchg64(&retire->fulllist, sb->next, newval));
+        }
+    }
 }
 
 void pmem_gc_mark_sb(mmfile_t *mm, superblock_t *sb)
@@ -396,19 +485,51 @@ void pmem_gc_mark_sb(mmfile_t *mm, superblock_t *sb)
             }
         }
         sb->gc = 1;
+        sb->suggest = 0;
         sb = __ptr(mm, sb->next);
     }
 }
 
-void pmem_gc_mark(mmfile_t *mm, memheap_t *heap)
+void pmem_gc_mark_suggest(mmfile_t *mm, superblock_t *sb)
+{
+    memblock_t *mb;
+    uint8_t *p;
+    unsigned i;
+    
+    while(sb) {
+        if (sb->suggest) {
+            p = (uint8_t*)(sb+1);
+            for(i=0; i<sb->total; i++, p+=sb->size+sizeof(*mb)) {
+                mb = (memblock_t*)p;
+                if (mb->suggest) {
+                    mb->gc = 1;
+                }
+            }
+            sb->gc = 1;
+            sb->suggest = 0;
+        }
+        sb = __ptr(mm, sb->next);
+    }
+}
+
+void pmem_gc_mark(mmfile_t *mm, memheap_t *heap, int suggest)
 {
     poolblock_t *pb;
     unsigned i, j;
 
     for(i=0; i<heap->nr_procheap; i++) {
         for(j=0; j<NR_SZCLS; j++) {
-            pmem_gc_mark_sb(mm, __ptr(mm, heap->procheap[i].szcls[j].freelist));
-            pmem_gc_mark_sb(mm, __ptr(mm, heap->procheap[i].szcls[j].fulllist));
+            if (suggest) {
+                pmem_gc_mark_suggest(mm,
+                        __ptr(mm, heap->procheap[i].szcls[j].freelist));
+                pmem_gc_mark_suggest(mm,
+                        __ptr(mm, heap->procheap[i].szcls[j].fulllist));
+            } else {
+                pmem_gc_mark_sb(mm,
+                        __ptr(mm, heap->procheap[i].szcls[j].freelist));
+                pmem_gc_mark_sb(mm,
+                        __ptr(mm, heap->procheap[i].szcls[j].fulllist));
+            }
         }
     }
     
@@ -419,22 +540,7 @@ void pmem_gc_mark(mmfile_t *mm, memheap_t *heap)
     }
 }
 
-void pmem_gc_suggest(void *addr)
-{
-    memblock_t *mb;
-    superblock_t *sb;
-
-    if (!addr) return;
-
-    mb = (memblock_t*)addr - 1;
-    if (mb->type == 1) {
-        mb->gc = 1;
-        sb = (superblock_t*)((uint8_t*)mb - mb->sbofs);
-        sb->gc = 1;
-    }
-}
-
-int pmem_gc_free_sb(superblock_t *sb)
+int pmem_gc_free_sb(superblock_t *sb, gcfreecb_t callback, void *user)
 {
     memblock_t *mb;
     uint8_t *p;
@@ -446,34 +552,41 @@ int pmem_gc_free_sb(superblock_t *sb)
     for(n=i=0; i<sb->total; i++, p+=sb->size+sizeof(*mb)) {
         mb = (memblock_t*)p;
         if (mb->gc) {
-            pmem_sb_free(sb, mb);
+            callback(user, mb+1);
+            pmem_sb_free(sb, mb+1);
             n++;
         }
     }
     return n;
 }
 
-void pmem_gc_free_sblist(mmfile_t *mm, volatile mlist_t *memory)
+void pmem_gc_free_sblist(mmfile_t *mm, volatile mlist_t *memory, gcfreecb_t callback, void *user)
 {
     uint64_t oldval, newval;
     superblock_t *sb;
     int n;
 
+#if 0
     // First get the freelist to ourselves to no one can mess with it
     do {
         oldval = memory->freelist;
     } while(!cmpxchg64(&memory->freelist, oldval, 0));
+#else
+    oldval = memory->freelist;
+#endif
 
     // Now, walk the free list, collect garbage and put blocks
     // back onto the freelist
     newval = oldval;
-    sb = __ptr(mm, oldval);
+    sb = __ptr(mm, newval);
     while(sb) {
-        pmem_gc_free_sb(sb);
+        pmem_gc_free_sb(sb, callback, user);
         oldval = sb->next;
+#if 0
         do {
             sb->next = memory->freelist;
         } while(!cmpxchg64(&memory->freelist, sb->next, newval));
+#endif
         newval = oldval;
         sb = __ptr(mm, newval);
     }
@@ -488,15 +601,15 @@ void pmem_gc_free_sblist(mmfile_t *mm, volatile mlist_t *memory)
     newval = oldval;
     sb = __ptr(mm, newval);
     while(sb) {
-        n = pmem_gc_free_sb(sb);
+        n = pmem_gc_free_sb(sb, callback, user);
         oldval = sb->next;
         if (n) {
             do {
-                oldval = memory->freelist;
+                sb->next = memory->freelist;
             } while(!cmpxchg64(&memory->freelist, sb->next, newval));
         } else {
             do {
-                oldval = memory->fulllist;
+                sb->next = memory->fulllist;
             } while(!cmpxchg64(&memory->fulllist, sb->next, newval));
         }
         newval = oldval;
@@ -504,15 +617,16 @@ void pmem_gc_free_sblist(mmfile_t *mm, volatile mlist_t *memory)
     }
 }
 
-void pmem_gc_free(mmfile_t *mm, memheap_t *heap, int fast)
+void pmem_gc_free(mmfile_t *mm, memheap_t *heap, int fast, gcfreecb_t cb, void *user)
 {
     poolblock_t *pb;
     unsigned i, j;
     uint64_t oldval, newval;
 
+    free_pattern = fast ? 0xFE : 0xFA;
     for(i=0; i<heap->nr_procheap; i++) {
         for(j=0; j<NR_SZCLS; j++) {
-            pmem_gc_free_sblist(mm, &heap->procheap[i].szcls[j]);
+            pmem_gc_free_sblist(mm, &heap->procheap[i].szcls[j], cb, user);
         }
     }
 
@@ -529,6 +643,7 @@ void pmem_gc_free(mmfile_t *mm, memheap_t *heap, int fast)
     while(pb) {
         oldval = pb->next;
         if (pb->gc) {
+            cb(user, pb+1);
             pmem_pool_free(pb);
             // FIXME: a mempool with free space should be moved to the
             // front of the mempool list

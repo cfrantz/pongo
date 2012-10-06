@@ -1,10 +1,12 @@
 #ifndef MMFILE_H
 #define MMFILE_H
 
+#include <stdlib.h>
 #ifdef WIN32
 #include <windows.h>
 #endif
 #include <pongo/stdtypes.h>
+#include <pongo/log.h>
 #include <assert.h>
 
 /*
@@ -78,7 +80,8 @@ static inline mmap_t *__mm_ptr(mmfile_t *mm, void *ptr)
 			return map;
 		}
 	}
-	assert(ptr == (void*)"Invalid Pointer");
+	log_error("Invalid pointer: %p", ptr);
+	abort();
 	return NULL;
 }
 
@@ -113,7 +116,8 @@ again:
 		mm_resize(mm, nsz);
 		goto again;
 	}
-	assert(offset == (long)"Invalid offset");
+	log_error("Invalid offset: %" PRIx64, offset);
+	abort();
 	return NULL;
 }
 

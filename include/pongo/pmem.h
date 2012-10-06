@@ -19,10 +19,12 @@ typedef struct _pdescriptor {
 	};
 } pdescr_t;
 		
+#define SIG_MEMPOOL 0x204c4f4f504d454d
 typedef struct _mempool {
+	uint64_t signature;
 	uint64_t next;
 	uint32_t size;
-	uint8_t __pad[64-(sizeof(uint64_t)+sizeof(uint32_t))];
+	uint8_t __pad[64-(2*sizeof(uint64_t)+sizeof(uint32_t))];
 	volatile pdescr_t desc[1];
 } mempool_t;
 
@@ -43,7 +45,8 @@ typedef struct _memblock {
 		type:	1,
 		alloc:	1,
 		gc:	1,
-		_resv:  13;
+		suggest:1,
+		_resv:  12;
 } memblock_t;
 
 typedef union _bdescr { 
@@ -56,14 +59,17 @@ typedef union _bdescr {
 		uint64_t all;
 } bdescr_t;
 
+#define SIG_SUPERBLK 0x04b4c425245505553ULL
 typedef struct _superblock {
+	uint64_t signature;
 	uint64_t next;
 	volatile bdescr_t desc;
 	uint32_t size, total;
 	uint32_t _xxx;
 	uint32_t gc :1,
-		_resv: 31;
-	uint8_t _pad[64 - (4*sizeof(uint64_t))];
+		 suggest: 1,
+		_resv: 30;
+	uint8_t _pad[64 - (5*sizeof(uint64_t))];
 } superblock_t;
 
 typedef struct _mlist {
@@ -99,8 +105,35 @@ extern void *pmem_sb_alloc(superblock_t *sb);
 extern void pmem_sb_free(superblock_t *sb, void *addr);
 
 extern void *pmem_alloc(mmfile_t *mm, memheap_t *heap, uint32_t sz);
-extern void pmem_gc_mark(mmfile_t *mm, memheap_t *heap);
-extern void pmem_gc_suggest(void *addr);
-extern void pmem_gc_free(mmfile_t *mm, memheap_t *heap, int fast);
+extern void pmem_retire(mmfile_t *mm, memheap_t *heap);
+extern void pmem_gc_mark(mmfile_t *mm, memheap_t *heap, int suggest);
+
+typedef void (*gcfreecb_t)(void *user, void *addr);
+extern void pmem_gc_free(mmfile_t *mm, memheap_t *heap, int fast, gcfreecb_t cb, void *user);
+
+static inline void pmem_gc_suggest(void *addr, int x)
+{
+    memblock_t *mb;
+    superblock_t *sb;
+
+    if (!addr) return;
+    mb = (memblock_t*)addr - 1;
+    if (mb->type == 1) {
+	assert(mb->alloc);
+        mb->suggest = 1;
+	mb->_resv = x;
+        sb = (superblock_t*)((uint8_t*)mb - mb->sbofs);
+        sb->suggest = 1;
+    }
+}
+
+static inline void pmem_gc_keep(void *addr)
+{
+    memblock_t *mb;
+    if (!addr) return;
+    mb = (memblock_t*)addr - 1;
+    mb->gc = 0;
+}
+
 
 #endif

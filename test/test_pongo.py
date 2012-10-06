@@ -117,6 +117,7 @@ class TestPongo(unittest.TestCase):
         # There's nothing to check for here, but it gets the code
         # covered by the coverage analyzer.
         pongo.gc(self.db)
+        pass
 
     def test_list(self):
         l = self.db['list']

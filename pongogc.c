@@ -41,15 +41,16 @@ main(int argc, char *argv[])
     if (!dbfile)
         return usage(argv[0]);
 
+    printf("PongoGC: file=%s\n", dbfile);
+    printf("  short_interval=%uus\n", short_interval);
+    printf("   long_interval=%uus\n", long_interval);
     log_init(NULL, LOG_DEBUG);
     ctx = dbfile_open(dbfile, 0);
+    db_gc(ctx, 1, NULL);
     t0 = utime_now();
     for(;;) {
         usleep(short_interval);
         t1 = utime_now();
-        if (ctx->nr_mb != ctx->root->nr_mb) {
-            dbfile_resize(ctx);
-        }
         if (t1-t0 < long_interval) {
             db_gc(ctx, 0, NULL);
         } else {

@@ -71,12 +71,12 @@ int dblist_setitem(pgctx_t *ctx, dbtype_t *list, int n, dbtype_t *item, int sync
 		return -1;
 
         sz = dblist_size(ctx, list, 0);
-        dbfree(ctx, _newlist);
+        dbfree(_newlist, 0xf1);
         _newlist = dballoc(ctx, sz);
         memcpy(_newlist, _list, sz);
         _newlist->item[n] = _offset(ctx, item);
     } while(!synchronize(ctx, sync, &list->list, _list, _newlist));
-    dbfree(ctx, _list);
+    dbfree(_list, 0xf2);
     return 0;
 }
 
@@ -93,7 +93,7 @@ int dblist_delitem(pgctx_t *ctx, dbtype_t *list, int n, dbtype_t **item, int syn
         if (n < 0 || n >= _list->len)
 		return -1;
         sz = dblist_size(ctx, list, -1);
-        dbfree(ctx, _newlist);
+        dbfree(_newlist, 0xf3);
         _newlist = dballoc(ctx, sz);
         _newlist->type = _InternalList;
         _newlist->len = _list->len - 1;
@@ -105,7 +105,7 @@ int dblist_delitem(pgctx_t *ctx, dbtype_t *list, int n, dbtype_t **item, int syn
             }
         }
     } while(!synchronize(ctx, sync, &list->list, _list, _newlist));
-    dbfree(ctx, _list);
+    dbfree(_list, 0xf4);
     return 0;
 }
 
@@ -125,7 +125,7 @@ int dblist_insert(pgctx_t *ctx, dbtype_t *list, int n, dbtype_t *item, int sync)
         if (n < 0 || n > _list->len)
             return -1;
         sz = dblist_size(ctx, list, 1);
-        dbfree(ctx, _newlist);
+        dbfree(_newlist, 0xf5);
         _newlist = dballoc(ctx, sz);
         _newlist->type = _InternalList;
         _newlist->len = _list->len + 1;
@@ -137,7 +137,7 @@ int dblist_insert(pgctx_t *ctx, dbtype_t *list, int n, dbtype_t *item, int sync)
             }
         }
     } while(!synchronize(ctx, sync, &list->list, _list, _newlist));
-    dbfree(ctx, _list);
+    dbfree(_list, 0xf6);
     return 0;
 }
 
@@ -157,7 +157,7 @@ int dblist_extend(pgctx_t *ctx, dbtype_t *list, int n, extendcb_t elem, void *us
     do {
 	    _list = _ptr(ctx, list->list);
         sz = dblist_size(ctx, list, n);
-        dbfree(ctx, _newlist);
+        dbfree(_newlist, 0xf7);
         _newlist = dballoc(ctx, sz);
         _newlist->type = _InternalList;
         _newlist->len = _list->len + n;
@@ -171,7 +171,7 @@ int dblist_extend(pgctx_t *ctx, dbtype_t *list, int n, extendcb_t elem, void *us
             _newlist->item[i] = _offset(ctx, item);
         }
     } while(!synchronize(ctx, sync, &list->list, _list, _newlist));
-    dbfree(ctx, _list);
+    dbfree(_list, 0xf8);
     return 0;
 }
 
@@ -184,7 +184,7 @@ int dblist_remove(pgctx_t *ctx, dbtype_t *list, dbtype_t *item, int sync)
     do {
 	    _list = _ptr(ctx, list->list);
         sz = dblist_size(ctx, list, 0);
-        dbfree(ctx, _newlist);
+        dbfree(_newlist, 0xf9);
         _newlist = dballoc(ctx, sz);
         _newlist->type = _InternalList;
         _newlist->len = _list->len - 1;
@@ -204,7 +204,7 @@ int dblist_remove(pgctx_t *ctx, dbtype_t *list, dbtype_t *item, int sync)
             return -1;
         }
     } while(!synchronize(ctx, sync, &list->list, _list, _newlist));
-    dbfree(ctx, _list);
+    dbfree(_list, 0xfa);
     return 0;
 }
 

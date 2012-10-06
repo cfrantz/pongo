@@ -1,13 +1,12 @@
 # Pongo Makefile
 #
 
-#SRCS=dbmem.c dbtypes.c log.c mmfile.c pmem.c misc.c json.c bonsai.c pidcache.c \
-#     container_list.c \
-#     container_obj.c \
-#     container_coll.c \
-#     container_cache.c \
-#     container_ops.c 
-SRCS=log.c mmfile.c pmem.c misc.c 
+SRCS=dbmem.c dbtypes.c log.c mmfile.c pmem.c misc.c json.c bonsai.c pidcache.c \
+     container_list.c \
+     container_obj.c \
+     container_coll.c \
+     container_cache.c \
+     container_ops.c 
 
 OBJS = $(SRCS:.c=.o)
 

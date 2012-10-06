@@ -62,15 +62,17 @@ int dbcollection_setitem(pgctx_t *ctx, dbtype_t *obj, dbtype_t *key, dbtype_t *v
             return -1;
     }
 
+    assert(ctx->winner.len == 0);
+    assert(ctx->loser.len == 0);
     do {
         // Read-Copy-Update loop for safe modify
         node = _ptr(ctx, obj->obj);
-        dbfree(ctx, newnode);
+        rculoser(ctx, newnode);
         newnode = bonsai_insert(ctx, node, key, value, sync & SET_OR_FAIL);
         if (newnode == BONSAI_ERROR)
             return -1;
     } while(!synchronize(ctx, sync & SYNC_MASK, &obj->obj, node, newnode));
-    dbfree(ctx, node);
+    rcuwinner(ctx, node);
     return 0;
 }
 
@@ -103,15 +105,17 @@ int dbcollection_delitem(pgctx_t *ctx, dbtype_t *obj, dbtype_t *key, dbtype_t **
 {
     dbtype_t *node, *newnode=NULL;
     assert(obj->type == Collection);
+    assert(ctx->winner.len == 0);
+    assert(ctx->loser.len == 0);
     // Read-Copy-Update loop for safe modify
     do {
         node = _ptr(ctx, obj->obj);
-        dbfree(ctx, newnode);
+        rculoser(ctx, newnode);
         newnode = bonsai_delete(ctx, node, key, value);
         if (newnode == BONSAI_ERROR)
             return -1;
     } while(!synchronize(ctx, sync, &obj->obj, node, newnode));
-    dbfree(ctx, node);
+    rcuwinner(ctx, node);
     return 0;
 }
 

@@ -16,6 +16,7 @@
 #include <pongo/log.h>
 
 pgctx_t *dbctx[NR_DB_CONTEXT];
+int __dblocked;
 
 #define _dblockop(ctx, op, lock) \
 	mm_lock(&(ctx)->mm, (op), \
@@ -31,47 +32,9 @@ pgctx_t *dbfindctx(const char *filename)
 	return NULL;
 }
 
-/*
- * The memblock_t is the unit of memory upon which the allocator and
- * operates.  A file will have several memblocks as it grows.
- *
- * See pmem.[ch] for details on how memblocks work.
- *
- * You must _addmemblock for each new memblock before _ptr and _offset
- * will work.  They'll crash if you don't.
- */
-static void _addmemblock(pgctx_t *ctx, memblock_t *mb)
-{
-	int i;
-	if (ctx->nr_mb % 16 == 0) {
-		ctx->mb = realloc(ctx->mb, sizeof(memblock_t*)*(ctx->nr_mb+16));
-		ctx->mb_offset = realloc(ctx->mb_offset, sizeof(memblock_t*)*(ctx->nr_mb+16));
-	}
-	assert(ctx->mb != NULL && ctx->mb_offset != NULL);
-
-	// The "mb" list is sorted by pointer address
-	for(i=0; i<ctx->nr_mb; i++) {
-		if (mb < ctx->mb[i]) {
-			memmove(&ctx->mb[i+1], &ctx->mb[i], (ctx->nr_mb-i)*sizeof(mb));
-			ctx->mb[i] = mb;
-			break;
-		}
-	}
-	if (i==ctx->nr_mb)
-		ctx->mb[ctx->nr_mb] = mb;
-
-	// "mb_offset" is sorted by offset.
-	// We assume that _addmemblock is always adding memblocks at greater
-	// file offsets than previous memblocks.
-	ctx->mb_offset[ctx->nr_mb] = mb;
-	ctx->nr_mb++;
-}
 
 void dbmem_info(pgctx_t *ctx)
 {
-	int i;
-	for(i=0; i<ctx->nr_mb; i++)
-		pmem_info(ctx->mb[i]);
 }
 
 #ifdef WANT_UUID_TYPE
@@ -81,14 +44,42 @@ dbtype_t *_newkey(pgctx_t *ctx, dbtype_t *value)
 }
 #endif
 
+void *dbfile_more_mem(mmfile_t *mm, uint32_t *size)
+{
+	uint64_t chunksize;
+	dbroot_t *root;
+	int n, rc;
+	void *ret = NULL;
+
+	root = (dbroot_t*)mm->map[0].ptr;
+	chunksize = root->meta.chunksize;
+	mm_lock(mm, MLCK_WR, __offset(mm, &root->resize), sizeof(root->resize));
+	if (mm->size == mm_size(mm)) {
+		log_debug("Resizing mmfile +%d bytes", chunksize);
+		rc = mm_resize(mm, mm->size + chunksize);
+		if (rc != 0) {
+			log_error("Resize failed"); abort();
+		}
+		n = mm->nmap-1;
+		*size = mm->map_offset[n].size;
+		ret = mm->map_offset[n].ptr;
+	} else {
+		chunksize = mm_size(mm);
+		log_debug("Expanding mapping to 0x%x bytes", chunksize);
+		mm_resize(mm, chunksize);
+	}
+	mm_lock(mm, MLCK_UN, __offset(mm, &root->resize), sizeof(root->resize));
+	return ret;
+}
+
 pgctx_t *dbfile_open(const char *filename, uint32_t initsize)
 {
 	int ret, i;
 	dbroot_t *r;
 	pgctx_t *ctx;
 	dbtype_t *c;
-	memblock_t *mb;
-	uint64_t offset;
+	mempool_t *pool;
+	memheap_t *heap;
 	if (initsize == 0) initsize = 16;
 
 	initsize *= 1024*1024;
@@ -105,18 +96,20 @@ pgctx_t *dbfile_open(const char *filename, uint32_t initsize)
 	if (ret < 0)
 		return NULL;
 	ctx->root = ctx->mm.map[0].ptr;
+	pmem_more_memory = dbfile_more_mem;
 #ifdef WANT_UUID_TYPE
 	ctx->newkey = _newkey;
 #endif
 
 	if (strcmp((char*)ctx->root->signature, DBROOT_SIG)) {
 		r = ctx->root;
-		_addmemblock(ctx, (memblock_t*)r);
-		r->mb_offset = 0;
-		r->mb_size = initsize;
-		r->pg_size = 4096;
-		r->pg_count = initsize / 4096;
 		strcpy((char*)r->signature, DBROOT_SIG);
+
+		pool = pmem_pool_init((char*)ctx->mm.map[0].ptr+4096, ctx->mm.map[0].size-4096);
+		heap = pmem_pool_alloc(pool, 4096);
+		heap->nr_procheap = (4096-sizeof(*heap)) / sizeof(procheap_t);
+		heap->pool.freelist = _offset(ctx, pool);
+		r->heap = _offset(ctx, heap);
 
 		// Create the root data dictionary
 		ctx->data = dbcollection_new(ctx);
@@ -127,7 +120,6 @@ pgctx_t *dbfile_open(const char *filename, uint32_t initsize)
 		ctx->cache = dbcache_new(ctx, 0, 0);
 		r->cache = _offset(ctx, ctx->cache);
 
-		ctx->pidcache = NULL;
 		r->pidcache = _offset(ctx, dbcollection_new(ctx));
 		
 		// Create const true/false objects
@@ -139,82 +131,24 @@ pgctx_t *dbfile_open(const char *filename, uint32_t initsize)
 		c->type = Boolean; c->bval = 1;
 		r->booleans[1] = _offset(ctx, c);
 
-		r->nr_mb = ctx->nr_mb;
 		r->meta.chunksize = initsize;
 		r->meta.id = _offset(ctx, dbstring_new(ctx, "_id", 3));
 	} else {
-
-		for(offset=0; offset<ctx->mm.size; offset+=mb->mb_size) {
-			mb = (memblock_t*)((uint8_t*)ctx->root + offset);
-			assert(mb->mb_size != 0);
-			log_verbose("adding memblock at offset 0x%llx", offset);
-			_addmemblock(ctx, mb);
-		}
 		ctx->data = _ptr(ctx, ctx->root->data);
 		ctx->cache = _ptr(ctx, ctx->root->cache);
 		log_verbose("data=%p cache=%p", ctx->data, ctx->cache);
 		// Probably don't want to run the GC here...
 		//db_gc(ctx, NULL);
 	}
+
+	// Pidcache in "ctx" points to this process' pidcache.
+	// The pidcache in root points to the global pidcache (container
+	// of pidcaches)
+	ctx->pidcache = NULL;
 	ctx->sync = 1;
 	return ctx;
 }
 
-void dbfile_addsize(pgctx_t *ctx)
-{
-	uint64_t chunksize;
-	memblock_t *mb;
-	int ret, n;
-
-	chunksize = ctx->root->meta.chunksize;
-	log_debug("Resizing mmfile +%d bytes", chunksize);
-	ret = mm_resize(&ctx->mm, ctx->mm.size + chunksize);
-	if (ret != 0) {
-		log_error("Resize failed"); abort();
-	}
-	n = ctx->mm.nmap-1;
-	mb = ctx->mm.map[n].ptr;
-#ifdef WIN32
-	memset(mb, 0, chunksize);
-#endif
-	mb->mb_offset = ctx->mm.map[n].offset;
-	mb->mb_size = chunksize;
-	mb->pg_size = 4096;
-	mb->pg_count = chunksize / 4096;
-	_addmemblock(ctx, mb);
-	ctx->root->nr_mb = ctx->nr_mb;
-}
-
-void dbfile_resize(pgctx_t *ctx)
-{
-	uint64_t size;
-	uint64_t offset;
-	memblock_t *mb;
-	int ret, n;
-
-	log_debug("Resizing mmfile");
-	_dblockop(ctx, MLCK_WR, ctx->root->nr_mb);
-	if (ctx->nr_mb != ctx->root->nr_mb) {
-		// If the file has already been resized, just adjust our mapping
-		size = mm_size(&ctx->mm);
-		ret = mm_resize(&ctx->mm, size);
-		if (ret != 0) {
-			log_error("Resize failed"); abort();
-		}
-		n = ctx->mm.nmap - 1;
-		mb = ctx->mm.map[n].ptr;
-		offset = mb->mb_offset;
-	       	while(offset<ctx->mm.size) {
-			_addmemblock(ctx, mb);
-			offset+=mb->mb_size;
-			mb = (memblock_t*)((uint8_t*)mb + mb->mb_size);
-		}
-	} else {
-		// Otherwise, add size to the file
-		dbfile_addsize(ctx);
-	}
-	_dblockop(ctx, MLCK_UN, ctx->root->nr_mb);
-}
 
 void dbfile_close(pgctx_t *ctx)
 {
@@ -224,6 +158,7 @@ void dbfile_close(pgctx_t *ctx)
 			dbctx[i] = NULL;
 		}
 	}
+	pmem_retire(&ctx->mm, _ptr(ctx, ctx->root->heap));
         mm_close(&ctx->mm);
 }
 
@@ -253,93 +188,32 @@ int _dbmemlock(pgctx_t *ctx, memblock_t *mb, uint32_t op)
 void dblock(pgctx_t *ctx)
 {
 	_dblockop(ctx, MLCK_RD, ctx->root->lock);
+	__dblocked=1;
 }
 
 void dbunlock(pgctx_t *ctx)
 {
+	__dblocked=0;
 	_dblockop(ctx, MLCK_UN, ctx->root->lock);
 }
 
-void *_dballoc(pgctx_t *ctx, int size, int lock)
+void *dballoc(pgctx_t *ctx, unsigned size)
 {
-	void *ret;
-	memblock_t *mb;
-	int n;
-	int tries;
-	int szcl;
-
-	if (size > 2048) {
-		szcl = DBMEM_BUCKET_PAGE;
-	} else {
-		size = (size + 15) & ~15;
-		szcl = ntz(pow2(size))-4;
-	}
-	for(tries=0; tries<3; tries++) {
-		n=ctx->last_mb[szcl];
-		do {
-			mb = ctx->mb[n];
-			// By convention, lock the page pool when doing alloc or free
-			if (lock) _dbmemlock(ctx, mb, MLCK_WR);
-			ret = palloc(mb, size);
-			if (lock) _dbmemlock(ctx, mb, MLCK_UN);
-			if (ret) {
-				memset(ret, 0, psize(mb, ret));
-				ctx->last_mb[szcl] = n;
-				return ret;
-			} else {
-				//log_debug("malloc failed in mb=%p, offset=0x%llx", mb, mb->mb_offset);
-#if 0
-				if (ctx->nr_mb>4) {
-					pongo_abort("dballoc");
-					return NULL;
-				}
-#endif
-			}
-			n = (n+1) % ctx->nr_mb;
-		} while(n != ctx->last_mb[szcl]);
-		//log_debug("malloc of %d bytes failed (tries=%d, nr_mb=%d, tid=%08lx)", size, tries, ctx->nr_mb, GetCurrentThreadId());
-		dbfile_resize(ctx);
-	}
-	return NULL;
+	return pmem_alloc(&ctx->mm, _ptr(ctx, ctx->root->heap), size);
 }
 
-void *dballoc(pgctx_t *ctx, int size)
-{
-	return _dballoc(ctx, size, 1);
-}
-
+/*
 void dbfree(pgctx_t *ctx, void *addr)
 {
-	memblock_t *mb;
-
-	if (!addr) return;
-        mb = __mb_ptr(ctx, addr);
-	pmem_gc_suggest(mb, addr);
+	pmem_gc_suggest(addr);
 }
+*/
 
-
-int dbsize(pgctx_t *ctx, void *addr)
-{
-	memblock_t *mb = __mb_ptr(ctx, addr);
-	return psize(mb, addr);
-}
-
-
-static void gc_count(void *addr, int size, void *user)
-{
-	gccount_t *c = (gccount_t*)user;
-	c->size += size;
-	c->num++;
-}
 
 static void gc_keep(pgctx_t *ctx, void *addr)
 {
-	memblock_t *mb;
-	if (!addr)
-		return;
-	mb = __mb_ptr(ctx, addr);
 	//printf("keeping type %02x at %p (%d bytes)\n", *(uint32_t*)addr, addr, psize(mb, addr));
-	pmem_gc_keep(mb, addr);
+	pmem_gc_keep(addr);
 }
 
 static void gc_walk_cache(pgctx_t *ctx, dbtype_t *node)
@@ -395,37 +269,11 @@ static void gc_walk(pgctx_t *ctx, dbtype_t *root)
 
 int _db_gc(pgctx_t *ctx, gcstats_t *stats)
 {
-	int i;
 	int64_t t0, t1, t2, t3, t4, t5;
-	memblock_t *mb;
+	memheap_t *heap = _ptr(ctx, ctx->root->heap);
 
 	t0 = utime_now();
-	for(i=0; i<ctx->nr_mb; i++) {
-		mb = ctx->mb[i];
-		// Lock the database during the mark phase
-		// FIXME: It may not be necessary to lock at all during the
-		// mark phase:
-		//   We only set the PM_GC_MARK bit on fully allocated pages
-		//   and we make a copy of the suballoc bitmaps.
-		//
-		//   If a page sized alloc happens, it will happen to a page
-		//   we won't touch.  If a free happens, we wont care.
-		//
-		//   If additional suballocs happen, it wont affect our copy
-		//   of the bitmap.
-		//
-		//   We do however have to do a lock/unlock after this to
-		//   insure that anybody who was in the database is out
-		//   by the time we go to the next phase.  That will prevent
-		//   us from freeing memory that wasn't referenced by one
-		//   of the root structures when we did the mark.
-		//_dbmemlock(ctx, mb, MLCK_WR);
-		pmem_gc_mark(mb);
-		//_dbmemlock(ctx, mb, MLCK_UN);
-	        if (stats)  {
-			pmem_foreach(ctx->mb[i], gc_count, &stats->before);
-		}
-	}
+	pmem_gc_mark(&ctx->mm, heap, 0);
 	t1 = utime_now();
 
 	// Synchronize here.  All this does is make sure anyone who was
@@ -435,14 +283,13 @@ int _db_gc(pgctx_t *ctx, gcstats_t *stats)
 	_dblockop(ctx, MLCK_UN, ctx->root->lock);
 
 	// Eliminate the const booleans
+	gc_keep(ctx, heap);
 	gc_keep(ctx, _ptr(ctx, ctx->root->booleans[0]));
 	gc_keep(ctx, _ptr(ctx, ctx->root->booleans[1]));
 	gc_keep(ctx, _ptr(ctx, ctx->root->meta.id));
 
 	t2 = utime_now();
-	if (ctx->cache) {
-		gc_walk(ctx, ctx->cache);
-	}
+	gc_walk(ctx, ctx->cache);
 	t3 = utime_now();
 
 	// Eliminate references that have parents that extend back to
@@ -453,15 +300,7 @@ int _db_gc(pgctx_t *ctx, gcstats_t *stats)
 	gc_walk(ctx, _ptr(ctx, ctx->root->pidcache));
 	t4 = utime_now();
 	// Free everything that remains
-	for(i=0; i<ctx->nr_mb; i++) {
-		mb = ctx->mb[i];
-		_dbmemlock(ctx, mb, MLCK_WR);
-		pmem_gc_free(mb, (gcfreecb_t)dbcache_del, ctx);
-		_dbmemlock(ctx, mb, MLCK_UN);
-	        if (stats)  {
-			pmem_foreach(mb, gc_count, &stats->after);
-		}
-	}
+	pmem_gc_free(&ctx->mm, heap, 0, (gcfreecb_t)dbcache_del, ctx);
 
 	t5 = utime_now();
 	log_debug("GC timing:");
@@ -476,22 +315,16 @@ int _db_gc(pgctx_t *ctx, gcstats_t *stats)
 
 int _db_gc_fast(pgctx_t *ctx)
 {
-	int i;
-	memblock_t *mb;
+	memheap_t *heap = _ptr(ctx, ctx->root->heap);
 
 	// Synchronize here.  All this does is make sure anyone who was
 	// in the database using the blocks that were suggested to be
-	// freed is now out of the database and the blocks can bex
+	// freed is now out of the database and the blocks can be
 	// safely freed.
+	pmem_gc_mark(&ctx->mm, heap, 1);
 	_dblockop(ctx, MLCK_WR, ctx->root->lock);
 	_dblockop(ctx, MLCK_UN, ctx->root->lock);
-
-	for(i=0; i<ctx->nr_mb; i++) {
-		mb = ctx->mb[i];
-		_dbmemlock(ctx, mb, MLCK_WR);
-		pmem_gc_free(mb, (gcfreecb_t)dbcache_del, ctx);
-		_dbmemlock(ctx, mb, MLCK_UN);
-	}
+	pmem_gc_free(&ctx->mm, heap, 1, (gcfreecb_t)dbcache_del, ctx);
 	return 0;
 }
 

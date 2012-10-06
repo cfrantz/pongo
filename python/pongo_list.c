@@ -220,7 +220,9 @@ PongoList_repr(PyObject *ob)
 void PongoList_Del(PyObject *ob)
 {
     PongoList *self = (PongoList*)ob;
+    dblock(self->ctx);
     pidcache_del(self->ctx, self);
+    dbunlock(self->ctx);
     PyObject_Del(ob);
 }
 

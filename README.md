@@ -30,14 +30,14 @@ Mutable Container Types
 -----------------------
 * List - A simple linear list structure.
 * Dictionary - A simple sorted list of key/value pairs.
-* Collection - A balanced binary tree containgin kv pairs.
+* Collection - A balanced binary tree[1] containgin kv pairs.
 
 Updates
 =======
 
 Any update to a container is done with Read-Copy-Update algorithms.
 This allows concurrent readers and writers to make consistent updates
-to the datastore without conflicts.
+to the datastore without locking and without conflicts.
 
 List Operations
 ===============
@@ -62,15 +62,11 @@ Dict and Collection Operations
 Memory Allocator
 ================
 The database is kept in an MMAPed file.  The file is sized in
-chunks (currently of 16mb).  At the end of each chunk, there is
-a small area (about 1.6% of the total) dedicated to memory
-management accounting.
+chunks (currently of 16mb).  
 
-The largest allowed allocation is 1/2 the chunk size (16mb/2 = 8mb now).
+Allocation is done in a lock-free manner loosely based on the techniques
+in [2].
 
-Need to lock the allocator during mallocs and frees.  Need to
-be able to increase the size of the file when an allocation
-fails because of no more memory left. (e.g. add more chunks)
 
 Garbage Collection
 ==================
@@ -113,4 +109,11 @@ stored in the database meta structure.
 
     uuval = uuid_constructor(None, "16-byte-string")
 
+Footnotes
+=========
+[1] Scalable Address Spaces Using RCU Balanced Trees 
+    http://people.csail.mit.edu/nickolai/papers/clements-bonsai.pdf
+
+[2] Scalable Lock-Free Dynamic Memory Allocation
+    http://redlinernotes.com/docs/Classics/Later_on/Scalable%20Lock-Free%20Dynamic%20Memory%20Allocation.pdf
 

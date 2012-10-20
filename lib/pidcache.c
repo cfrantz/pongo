@@ -7,12 +7,13 @@
 
 int pidcache_new(pgctx_t *ctx)
 {
-	dbtype_t *pc;
-	dbtype_t *root_pc;
-	dbtype_t *pid;
+	dbtype_t pc;
+	dbtype_t root_pc;
+	dbtype_t pid;
+    dbval_t *pcp;
     int _pid;
 
-    root_pc = _ptr(ctx, ctx->root->pidcache);
+    root_pc = ctx->root->pidcache;
     _pid = getpid();
 	pid = dbint_new(ctx, _pid);
 	pc = dbcollection_new(ctx);
@@ -22,18 +23,19 @@ int pidcache_new(pgctx_t *ctx)
         dbcollection_getitem(ctx, root_pc, pid, &pc);
     }
 
-    atomic_inc(&pc->refcnt);
+    pcp = dbptr(ctx, pc);
+    atomic_inc(&pcp->refcnt);
     ctx->pidcache = pc;
     return _pid;
 }
 
-void pidcache_put(pgctx_t *ctx, void *localobj, dbtype_t *dbobj)
+void pidcache_put(pgctx_t *ctx, void *localobj, dbtype_t dbobj)
 {
-    dbtype_t *key;
+    dbtype_t key;
     // make sure the pidcache is valid
     // also make sure we aren't trying to put the pidcache into
     // the pidcache.  The GC will die horribly if there is a cycle.
-    if (ctx->pidcache && ctx->pidcache != dbobj) {
+    if (ctx->pidcache.all && ctx->pidcache.all != dbobj.all) {
         key = dbint_new(ctx, (unsigned long)localobj);
         dbcollection_setitem(ctx, ctx->pidcache, key, dbobj, 0);
     }
@@ -41,8 +43,8 @@ void pidcache_put(pgctx_t *ctx, void *localobj, dbtype_t *dbobj)
 
 void pidcache_del(pgctx_t *ctx, void *localobj)
 {
-    dbtype_t *key;
-    if (ctx->pidcache) {
+    dbtype_t key;
+    if (ctx->pidcache.all) {
         key = dbint_new(ctx, (unsigned long)localobj);
         dbcollection_delitem(ctx, ctx->pidcache, key, NULL, 0);
     }
@@ -50,22 +52,24 @@ void pidcache_del(pgctx_t *ctx, void *localobj)
 
 void pidcache_destroy(pgctx_t *ctx)
 {
-	dbtype_t *root_pc;
-	dbtype_t *pid;
+	dbtype_t root_pc;
+	dbtype_t pid;
+    dbval_t *pcp;
     int _pid;
 
-    if (ctx->pidcache == NULL)
+    if (!ctx->pidcache.all)
         return;
 
-    root_pc = _ptr(ctx, ctx->root->pidcache);
+    root_pc = ctx->root->pidcache;
     _pid = getpid();
 	pid = dbint_new(ctx, _pid);
 
-    if (atomic_dec(&ctx->pidcache->refcnt) == 0) {
+    pcp = dbptr(ctx, ctx->pidcache);
+    if (atomic_dec(&pcp->refcnt) == 0) {
         dbcollection_delitem(ctx, root_pc, pid, NULL, 0);
-        ctx->pidcache = NULL;
+        ctx->pidcache = DBNULL;
     } else {
-        log_error("pid=%d: pidcache not destroyed (refcnt=%d)", _pid, ctx->pidcache->refcnt);
+        log_error("pid=%d: pidcache not destroyed (refcnt=%d)", _pid, pcp->refcnt);
     }
 }
 

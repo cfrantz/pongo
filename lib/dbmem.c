@@ -38,7 +38,7 @@ void dbmem_info(pgctx_t *ctx)
 }
 
 #ifdef WANT_UUID_TYPE
-dbtype_t *_newkey(pgctx_t *ctx, dbtype_t *value)
+dbtype_t _newkey(pgctx_t *ctx, dbtype_t value)
 {
 	return dbuuid_new(ctx, NULL);
 }
@@ -77,7 +77,6 @@ pgctx_t *dbfile_open(const char *filename, uint32_t initsize)
 	int ret, i;
 	dbroot_t *r;
 	pgctx_t *ctx;
-	dbtype_t *c;
 	mempool_t *pool;
 	memheap_t *heap;
 	if (initsize == 0) initsize = 16;
@@ -113,30 +112,21 @@ pgctx_t *dbfile_open(const char *filename, uint32_t initsize)
 
 		// Create the root data dictionary
 		ctx->data = dbcollection_new(ctx);
-		r->data = _offset(ctx, ctx->data);
+		r->data = ctx->data;
 
 		// Not sure about the atom cache...
-		ctx->cache = NULL;
-		ctx->cache = dbcache_new(ctx, 0, 0);
-		r->cache = _offset(ctx, ctx->cache);
+		//ctx->cache = DBNULL;
+		//ctx->cache = dbcache_new(ctx, 0, 0);
+		//r->cache = ctx->cache;
 
-		r->pidcache = _offset(ctx, dbcollection_new(ctx));
+		r->pidcache = dbcollection_new(ctx);
 		
-		// Create const true/false objects
-		c = dballoc(ctx, 16);
-		c->type = Boolean; c->bval = 0;
-		r->booleans[0] = _offset(ctx, c);
-
-		c = dballoc(ctx, 16);
-		c->type = Boolean; c->bval = 1;
-		r->booleans[1] = _offset(ctx, c);
-
 		r->meta.chunksize = initsize;
-		r->meta.id = _offset(ctx, dbstring_new(ctx, "_id", 3));
+		r->meta.id = dbstring_new(ctx, "_id", 3);
 	} else {
-		ctx->data = _ptr(ctx, ctx->root->data);
-		ctx->cache = _ptr(ctx, ctx->root->cache);
-		log_verbose("data=%p cache=%p", ctx->data, ctx->cache);
+		ctx->data = ctx->root->data;
+		ctx->cache = ctx->root->cache;
+		log_verbose("data=%" PRIx64 " cache=%" PRIx64, ctx->data.all, ctx->cache.all);
 		// Probably don't want to run the GC here...
 		//db_gc(ctx, NULL);
 	}
@@ -144,7 +134,7 @@ pgctx_t *dbfile_open(const char *filename, uint32_t initsize)
 	// Pidcache in "ctx" points to this process' pidcache.
 	// The pidcache in root points to the global pidcache (container
 	// of pidcaches)
-	ctx->pidcache = NULL;
+	ctx->pidcache = DBNULL;
 	ctx->sync = 1;
 	return ctx;
 }
@@ -216,49 +206,51 @@ static void gc_keep(pgctx_t *ctx, void *addr)
 	pmem_gc_keep(addr);
 }
 
-static void gc_walk_cache(pgctx_t *ctx, dbtype_t *node)
+static void gc_walk_cache(pgctx_t *ctx, dbtype_t node)
 {
-	if (!node) return;
-	gc_keep(ctx, node);
-	gc_walk_cache(ctx, _ptr(ctx, node->left));
-	gc_walk_cache(ctx, _ptr(ctx, node->right));
+	if (!node.all) return;
+	node.ptr = dbptr(ctx, node);
+	gc_keep(ctx, node.ptr);
+	gc_walk_cache(ctx, node.ptr->left);
+	gc_walk_cache(ctx, node.ptr->right);
 }
 
-static void gc_walk(pgctx_t *ctx, dbtype_t *root)
+static void gc_walk(pgctx_t *ctx, dbtype_t root)
 {
 	int i;
 	_list_t *list;
 	_obj_t *obj;
-	if (!root)
+	if (root.all == 0 || !isPtr(root.type))
 		return;
 
-	gc_keep(ctx, root);
-	switch(root->type) {
+	root.ptr = dbptr(ctx, root);
+	gc_keep(ctx, root.ptr);
+	switch(root.ptr->type) {
 		case List:
-			list = _ptr(ctx, root->list);
+			list = dbptr(ctx, root.ptr->list);
 			gc_keep(ctx, list);
 			for(i=0; i<list->len; i++) 
-				gc_walk(ctx, _ptr(ctx, list->item[i]));
+				gc_walk(ctx, list->item[i]);
 			break;
 		case Object:
-			obj = _ptr(ctx, root->obj);
+			obj = dbptr(ctx, root.ptr->obj);
 			gc_keep(ctx, obj);
 			for(i=0; i<obj->len; i++) {
-				gc_walk(ctx, _ptr(ctx, obj->item[i].key));
-				gc_walk(ctx, _ptr(ctx, obj->item[i].value));
+				gc_walk(ctx, obj->item[i].key);
+				gc_walk(ctx, obj->item[i].value);
 			}
 			break;
 		case Collection:
-			gc_walk(ctx, _ptr(ctx, root->obj));
+			gc_walk(ctx, root.ptr->obj);
 			break;
 		case Cache:
-			gc_walk_cache(ctx, _ptr(ctx, root->cache));
+			gc_walk_cache(ctx, root.ptr->cache);
 			break;
 		case _BonsaiNode:
-			gc_walk(ctx, _ptr(ctx, root->left));
-			gc_walk(ctx, _ptr(ctx, root->key));
-			gc_walk(ctx, _ptr(ctx, root->value));
-			gc_walk(ctx, _ptr(ctx, root->right));
+			gc_walk(ctx, root.ptr->left);
+			gc_walk(ctx, root.ptr->key);
+			gc_walk(ctx, root.ptr->value);
+			gc_walk(ctx, root.ptr->right);
 			break;
 		default:
 			// Nothing to do
@@ -284,9 +276,11 @@ int _db_gc(pgctx_t *ctx, gcstats_t *stats)
 
 	// Eliminate the const booleans
 	gc_keep(ctx, heap);
-	gc_keep(ctx, _ptr(ctx, ctx->root->booleans[0]));
-	gc_keep(ctx, _ptr(ctx, ctx->root->booleans[1]));
-	gc_keep(ctx, _ptr(ctx, ctx->root->meta.id));
+	//gc_keep(ctx, _ptr(ctx, ctx->root->booleans[0]));
+	//gc_keep(ctx, _ptr(ctx, ctx->root->booleans[1]));
+	if (isPtr(ctx->root->meta.id.type)) {
+		gc_keep(ctx, dbptr(ctx, ctx->root->meta.id));
+	}
 
 	t2 = utime_now();
 	gc_walk(ctx, ctx->cache);
@@ -297,10 +291,11 @@ int _db_gc(pgctx_t *ctx, gcstats_t *stats)
 	gc_walk(ctx, ctx->data);
 
 	// Also any references owned by all currently running processes
-	gc_walk(ctx, _ptr(ctx, ctx->root->pidcache));
+	gc_walk(ctx, ctx->root->pidcache);
 	t4 = utime_now();
 	// Free everything that remains
-	pmem_gc_free(&ctx->mm, heap, 0, (gcfreecb_t)dbcache_del, ctx);
+	//pmem_gc_free(&ctx->mm, heap, 0, (gcfreecb_t)dbcache_del, ctx);
+	pmem_gc_free(&ctx->mm, heap, 0, NULL, ctx);
 
 	t5 = utime_now();
 	log_debug("GC timing:");
@@ -324,7 +319,8 @@ int _db_gc_fast(pgctx_t *ctx)
 	pmem_gc_mark(&ctx->mm, heap, 1);
 	_dblockop(ctx, MLCK_WR, ctx->root->lock);
 	_dblockop(ctx, MLCK_UN, ctx->root->lock);
-	pmem_gc_free(&ctx->mm, heap, 1, (gcfreecb_t)dbcache_del, ctx);
+	pmem_gc_free(&ctx->mm, heap, 1, NULL, ctx);
+	//pmem_gc_free(&ctx->mm, heap, 1, (gcfreecb_t)dbcache_del, ctx);
 	return 0;
 }
 

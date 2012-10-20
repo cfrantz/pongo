@@ -20,105 +20,120 @@ typedef enum {
 } subtree_t;
 
 int
-bonsai_size(dbtype_t *node)
+bonsai_size(pgctx_t *ctx, dbtype_t node)
 {
-	return node ? node->size: 0;
+    if (node.all == 0)
+        return 0;
+    node.ptr = dbptr(ctx, node);
+    return node.ptr->size;
 }
 
-static dbtype_t *
-bonsai_new(pgctx_t *ctx, dbtype_t *left, dbtype_t *right, dbtype_t *key, dbtype_t *value)
+static dbtype_t
+bonsai_new(pgctx_t *ctx, dbtype_t left, dbtype_t right, dbtype_t key, dbtype_t value)
 {
-    dbtype_t *node;
+    dbtype_t node;
 
-    node = dballoc(ctx, sizeof(dbnode_t));
-    node->type = _BonsaiNode;
-    node->left = _offset(ctx, left);
-    node->right = _offset(ctx, right);
-    node->size = 1 + bonsai_size(left) + bonsai_size(right);
-    node->key = _offset(ctx, key);
-    node->value = _offset(ctx, value);
+    node.ptr = dballoc(ctx, sizeof(dbnode_t));
+    node.ptr->type = _BonsaiNode;
+    node.ptr->left = left;
+    node.ptr->right = right;
+    node.ptr->size = 1 + bonsai_size(ctx, left) + bonsai_size(ctx, right);
+    node.ptr->key = key;
+    node.ptr->value = value;
     rculoser(node, 0);
-    return node;
+    return dboffset(ctx, node.ptr);
 }
 
-static dbtype_t *
-single_left(pgctx_t *ctx, dbtype_t *left, dbtype_t *right, dbtype_t *key, dbtype_t *value)
+static dbtype_t
+single_left(pgctx_t *ctx, dbtype_t left, dbtype_t right, dbtype_t key, dbtype_t value)
 {
-    dbtype_t *ret;
+    dbtype_t ret;
+    dbval_t *r = dbptr(ctx, right);
+
     ret = bonsai_new(ctx,
-            bonsai_new(ctx, left, GET(right->left), key, value),
-            GET(right->right),
-            GET(right->key), GET(right->value));
+            bonsai_new(ctx, left, r->left, key, value),
+            r->right,
+            r->key, r->value);
     rcuwinner(right, 0xe1);
     return ret;
 }
 
-static dbtype_t *
-double_left(pgctx_t *ctx, dbtype_t *left, dbtype_t *right, dbtype_t *key, dbtype_t *value)
+static dbtype_t 
+double_left(pgctx_t *ctx, dbtype_t left, dbtype_t right, dbtype_t key, dbtype_t value)
 {
-    dbtype_t *ret;
+    dbtype_t ret;
+    dbval_t *r = dbptr(ctx, right);
+    dbval_t *rl = dbptr(ctx, r->left);
+
     ret = bonsai_new(ctx,
-            bonsai_new(ctx, left, GET(GET(right->left)->left), key, value),
-            bonsai_new(ctx, GET(GET(right->left)->right), GET(right->right), GET(right->key), GET(right->value)),
-                    GET(GET(right->left)->key), GET(GET(right->left)->value));
-    rcuwinner(GET(right->left), 0xe2);
+            bonsai_new(ctx, left, rl->left, key, value),
+            bonsai_new(ctx, rl->right, r->right, r->key, r->value),
+                    rl->key, rl->value);
+    rcuwinner(r->left, 0xe2);
     rcuwinner(right, 0xe3);
     return ret;
 }
 
-static dbtype_t *
-single_right(pgctx_t *ctx, dbtype_t *left, dbtype_t *right, dbtype_t *key, dbtype_t *value)
+static dbtype_t
+single_right(pgctx_t *ctx, dbtype_t left, dbtype_t right, dbtype_t key, dbtype_t value)
 {
-    dbtype_t *ret;
+    dbtype_t ret;
+    dbval_t *l = dbptr(ctx, left);
     ret = bonsai_new(ctx,
-            GET(left->left),
-            bonsai_new(ctx, GET(left->right), right, key, value),
-            GET(left->key), GET(left->value));
+            l->left,
+            bonsai_new(ctx, l->right, right, key, value),
+            l->key, l->value);
     rcuwinner(left, 0xe4);
     return ret;
 }
 
-static dbtype_t *
-double_right(pgctx_t *ctx, dbtype_t *left, dbtype_t *right, dbtype_t *key, dbtype_t *value)
+static dbtype_t
+double_right(pgctx_t *ctx, dbtype_t left, dbtype_t right, dbtype_t key, dbtype_t value)
 {
-    dbtype_t *ret;
+    dbtype_t ret;
+    dbval_t *l = dbptr(ctx, left);
+    dbval_t *lr = dbptr(ctx, l->right);
+
     ret = bonsai_new(ctx,
-            bonsai_new(ctx, GET(left->left), GET(GET(left->right)->left), GET(left->key), GET(left->value)),
-            bonsai_new(ctx, GET(GET(left->right)->right), right, key, value),
-            GET(GET(left->right)->key), GET(GET(left->right)->value));
-    rcuwinner(GET(left->right), 0xe5);
+            bonsai_new(ctx, l->left, lr->left, l->key, l->value),
+            bonsai_new(ctx, lr->right, right, key, value),
+            lr->key, lr->value);
+    rcuwinner(l->right, 0xe5);
     rcuwinner(left, 0xe6);
     return ret;
 }
 
-static dbtype_t *
-balance_left(pgctx_t *ctx, dbtype_t *left, dbtype_t *right, dbtype_t *key, dbtype_t *value)
+static dbtype_t
+balance_left(pgctx_t *ctx, dbtype_t left, dbtype_t right, dbtype_t key, dbtype_t value)
 {
-    uint64_t rln = bonsai_size(GET(right->left));
-    uint64_t rrn = bonsai_size(GET(right->right));
+    dbval_t *r = dbptr(ctx, right);
+    uint64_t rln = bonsai_size(ctx, r->left);
+    uint64_t rrn = bonsai_size(ctx, r->right);
     return (rln < rrn) ?
         single_left(ctx, left, right, key, value) :
         double_left(ctx, left, right, key, value) ;
 }
 
-static dbtype_t *
-balance_right(pgctx_t *ctx, dbtype_t *left, dbtype_t *right, dbtype_t *key, dbtype_t *value)
-{
-    uint64_t lln = bonsai_size(GET(left->left));
-    uint64_t lrn = bonsai_size(GET(left->right));
+static dbtype_t
+balance_right(pgctx_t *ctx, dbtype_t left, dbtype_t right, dbtype_t key, dbtype_t value)
+{ 
+    dbval_t *l = dbptr(ctx, left);
+    uint64_t lln = bonsai_size(ctx, l->left);
+    uint64_t lrn = bonsai_size(ctx, l->right);
     return (lrn < lln) ?
         single_right(ctx, left, right, key, value) :
         double_right(ctx, left, right, key, value) ;
 }
 
-static inline dbtype_t *
-balance(pgctx_t *ctx, dbtype_t *cur, dbtype_t *left, dbtype_t *right, subtree_t which, int inplace)
+static inline dbtype_t
+balance(pgctx_t *ctx, dbtype_t cur, dbtype_t left, dbtype_t right, subtree_t which, int inplace)
 {
-    uint64_t ln = bonsai_size(left);
-    uint64_t rn = bonsai_size(right);
-    dbtype_t *key = GET(cur->key);
-    dbtype_t *value = GET(cur->value);
-    dbtype_t *ret;
+    uint64_t ln = bonsai_size(ctx, left);
+    uint64_t rn = bonsai_size(ctx, right);
+    dbval_t *cp = dbptr(ctx, cur);
+    dbtype_t key = cp->key;
+    dbtype_t value = cp->value;
+    dbtype_t ret;
 
     if (ln+rn < 2)
         goto balanced;
@@ -136,12 +151,12 @@ balanced:
     if (inplace) {
         if (which == subtree_left) {
             // rcu_assign_pointer
-            cur->left = _offset(ctx, left);
+            cp->left = left;
         } else {
             // rcu_assign_pointer
-            cur->right = _offset(ctx, right);
+            cp->right = right;
         }
-        cur->size = 1 + bonsai_size(left) + bonsai_size(right);
+        cp->size = 1 + bonsai_size(ctx, left) + bonsai_size(ctx, right);
         ret = cur;
     } else {
         ret = bonsai_new(ctx, left, right, key, value);
@@ -150,100 +165,65 @@ balanced:
     return ret;
 }
 
-dbtype_t *
-bonsai_insert(pgctx_t *ctx, dbtype_t *node, dbtype_t *key, dbtype_t *value, int insert_or_fail)
+dbtype_t
+bonsai_insert(pgctx_t *ctx, dbtype_t node, dbtype_t key, dbtype_t value, int insert_or_fail)
 {
     int cmp;
-    if (!node)
-        return bonsai_new(ctx, NULL, NULL, key, value);
+    dbval_t *np;
+    if (!node.all)
+        return bonsai_new(ctx, DBNULL, DBNULL, key, value);
 
-    cmp = dbcmp(ctx, key, GET(node->key));
-    if (insert_or_fail && cmp==0)
-        return BONSAI_ERROR;
+    np = dbptr(ctx, node);
+    cmp = dbcmp(ctx, key, np->key);
+    if (insert_or_fail && cmp==0) {
+        node.type = Error;
+        return node;
+    }
     if (cmp < 0) {
         return balance(ctx, node,
-                bonsai_insert(ctx, GET(node->left), key, value, insert_or_fail),
-                GET(node->right),
+                bonsai_insert(ctx, np->left, key, value, insert_or_fail),
+                np->right,
                 subtree_left, 1);
     }
     if (cmp > 0) {
         return balance(ctx, node,
-                GET(node->left),
-                bonsai_insert(ctx, GET(node->right), key, value, insert_or_fail),
+                np->left,
+                bonsai_insert(ctx, np->right, key, value, insert_or_fail),
                 subtree_right, 1);
     }
-    node->value = _offset(ctx, value);
+    np->value = value;
     return node;
 }
 
-static dbtype_t *
-_bonsai_insert_index(pgctx_t *ctx, dbtype_t *node, int index, dbtype_t *value)
+
+static dbtype_t 
+delete_min(pgctx_t *ctx, dbtype_t node, dbtype_t *out)
 {
-    int sz;
-    if (!node)
-        return bonsai_new(ctx, NULL, NULL, NULL, value);
+    dbval_t *np = dbptr(ctx, node);
+    dbtype_t left = np->left, right = np->right;
 
-    sz = bonsai_size(GET(node->left));
-    if (index < sz) {
-        return balance(ctx, node,
-                _bonsai_insert_index(ctx, GET(node->left), index, value),
-                GET(node->right),
-                subtree_left, 1);
-    }
-    if (index > sz) {
-        return balance(ctx, node,
-                GET(node->left),
-                _bonsai_insert_index(ctx, GET(node->right), index-(sz+1), value),
-                subtree_right, 1);
-    }
-    return balance(ctx, 
-            bonsai_new(ctx, NULL, NULL, NULL, value),
-            GET(node->left),
-            node,
-            subtree_right, 1);
-}
-
-dbtype_t *
-bonsai_insert_index(pgctx_t *ctx, dbtype_t *node, int index, dbtype_t *value)
-{
-    int sz = bonsai_size(node);
-    if (index < 0)
-        index += sz;
-
-    if (index == INT_MAX)
-        index = sz;
-    else if (index && (index < 0 || index >= sz))
-        return BONSAI_ERROR;
-
-    return _bonsai_insert_index(ctx, node, index, value);
-}
-
-static dbtype_t *
-delete_min(pgctx_t *ctx, dbtype_t *node, dbtype_t **out)
-{
-    dbtype_t *left = GET(node->left), *right = GET(node->right);
-
-    if (!left) {
+    if (!left.all) {
         *out = node;
         return right;
     }
     return balance(ctx, node, delete_min(ctx, left, out), right, subtree_left, 0);
 }
 
-static dbtype_t *
-_bonsai_delete(pgctx_t *ctx, dbtype_t *node, dbtype_t *key, dbtype_t **valout)
+static dbtype_t
+_bonsai_delete(pgctx_t *ctx, dbtype_t node, dbtype_t key, dbtype_t *valout)
 {
-    dbtype_t *min, *left, *right;
+    dbval_t *np = dbptr(ctx, node);
+    dbtype_t min, left, right;
     int cmp;
 
-    if (!node) {
-        if (valout) *valout = BONSAI_ERROR;
-        return NULL;
+    if (!node.all) {
+        if (valout) valout->type = Error;
+        return DBNULL;
     }
 
-    left = GET(node->left);
-    right = GET(node->right);
-    cmp = dbcmp(ctx, key, GET(node->key));
+    left = np->left;
+    right = np->right;
+    cmp = dbcmp(ctx, key, np->key);
     if (cmp < 0) {
         return balance(ctx, node, _bonsai_delete(ctx, left, key, valout), right, subtree_left, 1);
     }
@@ -251,214 +231,98 @@ _bonsai_delete(pgctx_t *ctx, dbtype_t *node, dbtype_t *key, dbtype_t **valout)
         return balance(ctx, node, left, _bonsai_delete(ctx, right, key, valout), subtree_right, 1);
     }
 
-    if (valout) *valout = GET(node->value);
+    if (valout) *valout = np->value;
     rcuwinner(node, 0xe9);
 
-    if (!left) return right;
-    if (!right) return left;
+    if (!left.all) return right;
+    if (!right.all) return left;
     right = delete_min(ctx, right, &min);
     return balance(ctx, min, left, right, subtree_right, 0);
 }
 
-dbtype_t *
-bonsai_delete(pgctx_t *ctx, dbtype_t *node, dbtype_t *key, dbtype_t **value)
+dbtype_t
+bonsai_delete(pgctx_t *ctx, dbtype_t node, dbtype_t key, dbtype_t *value)
 {
-    dbtype_t *valout = NULL;
-    dbtype_t *ret = _bonsai_delete(ctx, node, key, &valout);
+    dbtype_t valout = DBNULL;
+    dbtype_t ret = _bonsai_delete(ctx, node, key, &valout);
     if (value) *value = valout;
-    return (valout == BONSAI_ERROR) ? valout : ret;
-}
-
-static dbtype_t *
-_bonsai_delete_index(pgctx_t *ctx, dbtype_t *node, int index, dbtype_t **valout)
-{
-    dbtype_t *min, *left, *right;
-    int sz;
-
-    if (!node) {
-        if (valout) *valout = BONSAI_ERROR;
-        return NULL;
-    }
-
-    left = GET(node->left);
-    right = GET(node->right);
-    sz = bonsai_size(left);
-    if (index < sz)
-        return balance(ctx, node, _bonsai_delete_index(ctx, left, index, valout), right, subtree_left, 1);
-    if (index > sz)
-        return balance(ctx, node, left, _bonsai_delete_index(ctx, right, index-(sz+1), valout), subtree_right, 1);
-
-    if (valout) *valout = GET(node->value);
-    rcuwinner(node, 0xea);
-
-    if (!left) return right;
-    if (!right) return left;
-    right = delete_min(ctx, right, &min);
-    return balance(ctx, min, left, right, subtree_right, 0);
-}
-
-dbtype_t *
-bonsai_delete_index(pgctx_t *ctx, dbtype_t *node, int index, dbtype_t **value)
-{
-    dbtype_t *valout = NULL, *ret;
-    int sz = bonsai_size(node);
-    if (index < 0)
-        index += sz;
-    if (index < 0 || index >= sz)
-        return BONSAI_ERROR;
-
-    ret = _bonsai_delete_index(ctx, node, index, value);
-    if (value) *value = valout;
-    return (valout == BONSAI_ERROR) ? valout : ret;
-}
-
-dbtype_t *
-bonsai_delete_value(pgctx_t *ctx, dbtype_t *node, dbtype_t *value)
-{
-    dbtype_t *min, *left, *right, *n;
-    int cmp;
-
-    if (!node) {
-        return BONSAI_ERROR;
-    }
-
-    left = GET(node->left);
-    right = GET(node->right);
-
-    if (left) {
-        n = bonsai_delete_value(ctx, left, value);
-        if (n != BONSAI_ERROR) return balance(ctx, node, n, right, subtree_left, 1);
-    }
-
-    cmp = dbcmp(ctx, value, GET(node->value));
-    if (cmp == 0) {
-        // FIXME: is this the correct place to put the free?
-        rcuwinner(node, 0xee);
-        if (!left) return right;
-        if (!right) return left;
-        right = delete_min(ctx, right, &min);
-        return balance(ctx, min, left, right, subtree_right, 0);
-    }
-
-    if (right) {
-        n = bonsai_delete_value(ctx, right, value);
-        if (n != BONSAI_ERROR) return balance(ctx, node, left, n, subtree_right, 1);
-    }
-    return BONSAI_ERROR;
+    return (valout.type == Error) ? valout : ret;
 }
 
 int
-bonsai_find(pgctx_t *ctx, dbtype_t *node, dbtype_t *key, dbtype_t **value)
+bonsai_find(pgctx_t *ctx, dbtype_t node, dbtype_t key, dbtype_t *value)
 {
     int cmp;
-    while(node) {
-        cmp = dbcmp(ctx, key, GET(node->key));
+    while(node.all) {
+        node.ptr = dbptr(ctx, node);
+        cmp = dbcmp(ctx, key, node.ptr->key);
         if (cmp < 0) {
-            node = GET(node->left);
+            node = node.ptr->left;
         } else if (cmp > 0) {
-            node = GET(node->right);
+            node = node.ptr->right;
         } else {
-            break;
+            if (value) *value = node.ptr->value;
+            return 0;
         }
     }
 
-    if (node) {
-        if (value) *value = GET(node->value);
-        return 0;
-    }
     return -1;
 }
 
-dbtype_t *
-bonsai_find_primitive(pgctx_t *ctx, dbtype_t *node, dbtag_t type, const void *key)
+dbtype_t
+bonsai_find_primitive(pgctx_t *ctx, dbtype_t node, dbtag_t type, const void *key)
 {
     int cmp;
-    while(node) {
+    while(node.all) {
+        node.ptr = dbptr(ctx, node);
         // This is subtle:  all other bonsai calls to dbcmp are of the 
         // form dbcmp(key, GET(node->key)).  However, dbcmp_primitive
         // only accepts dbtype for the first argument, so the sense of
         // the compare must be inverted:
-        cmp = -dbcmp_primitive(GET(node->key), type, key);
+        cmp = -dbcmp_primitive(ctx, node.ptr->key, type, key);
         if (cmp < 0) {
-            node = GET(node->left);
+            node = node.ptr->left;
         } else if (cmp > 0) {
-            node = GET(node->right);
+            node = node.ptr->right;
         } else {
-            return GET(node->value);
+            return node.ptr->value;
         }
     }
-    return NULL;
-}
-
-int
-bonsai_find_value(pgctx_t *ctx, dbtype_t *node, dbtype_t *value)
-{
-    int cmp;
-
-    if (!node) return 0;
-
-    cmp = bonsai_find_value(ctx, GET(node->left), value);
-    if (cmp) return cmp;
-
-    cmp = !dbcmp(ctx, GET(node->value), value);
-    if (cmp) return cmp;
-
-    cmp = bonsai_find_value(ctx, GET(node->right), value);
-    return cmp;
-}
-
-dbtype_t *
-bonsai_index(pgctx_t *ctx, dbtype_t *node, int index)
-{
-    int sz = bonsai_size(node);
-
-    if (index < 0)
-        index += sz;
-    if (index < 0 || index >= sz)
-        return NULL;
-
-    while(node) {
-        sz = bonsai_size(GET(node->left));
-        if (index == sz) {
-            break;
-        } else if (index < sz) {
-            node = GET(node->left);
-        } else {
-            index -= (sz + 1);
-            node = GET(node->right);
-        }
-    }
-
-    return node;
+    return DBNULL;
 }
 
 void
-bonsai_foreach(pgctx_t *ctx, dbtype_t *node, bonsaicb_t cb, void *user)
+bonsai_foreach(pgctx_t *ctx, dbtype_t node, bonsaicb_t cb, void *user)
 {
-    if (node) {
-        bonsai_foreach(ctx, GET(node->left), cb, user);
+    dbval_t *np;
+    if (node.all) {
+        np = dbptr(ctx, node);
+        bonsai_foreach(ctx, np->left, cb, user);
         cb(ctx, node, user);
-        bonsai_foreach(ctx, GET(node->right), cb, user);
+        bonsai_foreach(ctx, np->right, cb, user);
     }
 }
 
 void
-bonsai_show(pgctx_t *ctx, dbtype_t *node, int depth)
+bonsai_show(pgctx_t *ctx, dbtype_t node, int depth)
 {
     char buf1[80], buf2[80];
+    dbval_t *np;
 
-    if (!node)
+    if (!node.all)
         return;
 
-    bonsai_show(ctx, GET(node->left), depth+1);
+    np = dbptr(ctx, node);
+    bonsai_show(ctx, np->left, depth+1);
     printf("%*s(%" PRId64 ") %s=>%s\n",
             depth*2, "",
-            node->size,
-            dbprint(GET(node->key), buf1, sizeof(buf1)),
-            dbprint(GET(node->value), buf2, sizeof(buf2)));
-    bonsai_show(ctx, GET(node->right), depth+1);
+            np->size,
+            dbprint(ctx, np->key, buf1, sizeof(buf1)),
+            dbprint(ctx, np->value, buf2, sizeof(buf2)));
+    bonsai_show(ctx, np->right, depth+1);
 }
 
+#if 0
 // Bonsai tree as dictionary (key/value storage)
 void test1(pgctx_t *ctx)
 {
@@ -551,4 +415,6 @@ void test2(pgctx_t *ctx)
         printf("**********************************************************************\n");
     }
 }
+#endif
 // vim: ts=4 sts=4 sw=4 expandtab:
+

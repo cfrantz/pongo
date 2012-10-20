@@ -25,6 +25,11 @@
  * which will contain several mmap regions.
  */
 
+struct mmtlb  {
+	uint64_t offset;
+	void *ptr;
+};
+
 typedef struct _mmap {
 	void *ptr;
 	uint64_t offset, size;
@@ -44,6 +49,7 @@ typedef struct _mmfile {
 	mmap_t *map;
 	mmap_t *map_offset;
 	uint64_t size;
+	struct mmtlb tlbofs[256], tlbptr[256];
 } mmfile_t;
 #define MLCK_RD		0x0001		// Reader lock
 #define MLCK_WR		0x0002		// Writer lock
@@ -121,20 +127,64 @@ again:
 	return NULL;
 }
 
+// Translation lookaside buffer (for speeding up __offset and __ptr)
+static inline uint8_t __key(uint64_t k)
+{
+	k ^= (k>>32);
+	k ^= (k>>16);
+	k ^= (k>>8);
+	return k;
+}
+
+static inline uint64_t __tlboffset(mmfile_t *mm, void *ptr)
+{
+	struct mmtlb *t = &mm->tlbofs[__key((uint64_t)ptr)];
+	return ptr == t->ptr ? t->offset : 0;
+}
+
+static inline void * __tlbptr(mmfile_t *mm, uint64_t offset)
+{
+	struct mmtlb *t = &mm->tlbptr[__key(offset)];
+	return offset == t->offset ? t->ptr : NULL;
+}
+
+static inline void __tlbset(mmfile_t *mm, uint64_t offset, void *ptr)
+{
+	struct mmtlb *t;
+       	t = &mm->tlbptr[__key(offset)];
+	t->offset = offset; t->ptr = ptr;
+	mm->tlbofs[__key((uint64_t)ptr)] = *t;
+}
+
 // Given a pointer in a mmap file, return it's 64-bit offset
 static inline uint64_t __offset(mmfile_t *mm, void *ptr)
 {
-	mmap_t *m = __mm_ptr(mm, ptr);
-	return m->offset + ((uint8_t*)ptr - (uint8_t*)m->ptr);
+	mmap_t *m;
+	uint64_t offset;
+
+	offset = __tlboffset(mm, ptr);
+	if (!offset) {
+	       	m = __mm_ptr(mm, ptr);
+		offset = m->offset + ((uint8_t*)ptr - (uint8_t*)m->ptr);
+		__tlbset(mm, offset, ptr);
+	}
+	return offset;
 }
 
 // Given an offset in a mmap file, return its pointer
 static inline void *__ptr(mmfile_t *mm, uint64_t offset)
 {
 	mmap_t *m;
+	void *ptr;
+
 	if (!offset) return NULL;
-	m = __mm_offset(mm, offset);
-	return m->ptr + (offset - m->offset);
+	ptr = __tlbptr(mm, offset);
+	if (!ptr) {
+		m = __mm_offset(mm, offset);
+		ptr = m->ptr + (offset - m->offset);
+		__tlbset(mm, offset, ptr);
+	}
+	return ptr;
 }
 
 #endif

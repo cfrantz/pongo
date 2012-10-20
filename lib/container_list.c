@@ -8,115 +8,123 @@
 #include <pongo/misc.h>
 #include <pongo/log.h>
 
-dbtype_t *dblist_new(pgctx_t *ctx)
+dbtype_t dblist_new(pgctx_t *ctx)
 {
-	dbtype_t *list;
+	dbtype_t list;
     _list_t *_list;
-	list = dballoc(ctx, sizeof(dblist_t));
-    if (!list) return NULL;
-	list->type = List;
+	list.ptr = dballoc(ctx, sizeof(dblist_t));
+    if (!list.ptr) return DBNULL;
+	list.ptr->type = List;
     // Its easier to implement all of the list operations if the object
     // starts with an empty list
     _list = dballoc(ctx, sizeof(_list));
-    if (!_list) return NULL;
+    if (!_list) return DBNULL;
     _list->type = _InternalList;
     _list->len = 0;
-    list->list = _offset(ctx, _list);
-	return list;
+    list.ptr->list = dboffset(ctx, _list);
+	return dboffset(ctx, list.ptr);
 }
 
-int dblist_len(pgctx_t *ctx, dbtype_t *list)
+int dblist_len(pgctx_t *ctx, dbtype_t list)
 {
 	_list_t *_list;
-	assert(list->type == List);
-	_list = _ptr(ctx, list->list);
+    list.ptr = dbptr(ctx, list);
+	assert(list.ptr->type == List);
+	_list = dbptr(ctx, list.ptr->list);
     return _list->len;
 }
 
-int dblist_size(pgctx_t *ctx, dbtype_t *list, int n)
+
+static int dblist_size(_list_t *_list, int n)
 {
 	int len;
-	_list_t *_list;
-	assert(list->type == List);
-	_list = _ptr(ctx, list->list);
 	len = _list ? _list->len : 0;
 	return sizeof(*_list) + sizeof(_list->item[0])*(len + n);
 }
 
-int dblist_getitem(pgctx_t *ctx, dbtype_t *list, int n, dbtype_t **item)
+
+int dblist_getitem(pgctx_t *ctx, dbtype_t list, int n, dbtype_t *item)
 {
 	_list_t *_list;
-	assert(list->type == List);
-	_list = _ptr(ctx, list->list);
+
+    list.ptr = dbptr(ctx, list);
+	assert(list.ptr->type == List);
+	_list = dbptr(ctx, list.ptr->list);
     // As in Python, negative list index means "from end of list"
     if (n<0) n += _list->len;
     if (n >= 0 && n < _list->len) {
-        *item = _ptr(ctx, _list->item[n]);
+        *item = _list->item[n];
         return 0;
     }
 	return -1;
 }
 
-int dblist_setitem(pgctx_t *ctx, dbtype_t *list, int n, dbtype_t *item, int sync)
+int dblist_setitem(pgctx_t *ctx, dbtype_t list, int n, dbtype_t item, int sync)
 {
 	_list_t *_list, *_newlist = NULL;
 	int sz;
-	assert(list->type == List);
+
+    list.ptr = dbptr(ctx, list);
+	assert(list.ptr->type == List);
     do {
         // Read-Copy-Update loop for modify operations
-    	_list = _ptr(ctx, list->list);
+    	_list = dbptr(ctx, list.ptr->list);
         // As in Python, negative list index means "from end of list"
         if (n<0) n += _list->len;
         if (n < 0 || n >= _list->len)
 		return -1;
 
-        sz = dblist_size(ctx, list, 0);
+        sz = dblist_size(_list, 0);
         dbfree(_newlist, 0xf1);
         _newlist = dballoc(ctx, sz);
         memcpy(_newlist, _list, sz);
-        _newlist->item[n] = _offset(ctx, item);
-    } while(!synchronize(ctx, sync, &list->list, _list, _newlist));
+        _newlist->item[n] = item;
+    } while(!synchronizep(ctx, sync, &list.ptr->list, _list, _newlist));
     dbfree(_list, 0xf2);
     return 0;
 }
 
-int dblist_delitem(pgctx_t *ctx, dbtype_t *list, int n, dbtype_t **item, int sync)
+int dblist_delitem(pgctx_t *ctx, dbtype_t list, int n, dbtype_t *item, int sync)
 {
 	_list_t *_list, *_newlist = NULL;
 	int sz, i, j;
-	assert(list->type == List);
+
+    list.ptr = dbptr(ctx, list);
+	assert(list.ptr->type == List);
     do {
         // Read-Copy-Update loop for modify operations
-        _list = _ptr(ctx, list->list);
+        _list = dbptr(ctx, list.ptr->list);
         // As in Python, negative list index means "from end of list"
         if (n<0) n += _list->len;
         if (n < 0 || n >= _list->len)
 		return -1;
-        sz = dblist_size(ctx, list, -1);
+        sz = dblist_size(_list, 0);
         dbfree(_newlist, 0xf3);
         _newlist = dballoc(ctx, sz);
         _newlist->type = _InternalList;
         _newlist->len = _list->len - 1;
         for(i=j=0; i<_list->len; i++) {
             if (i==n) {
-                *item = _ptr(ctx, _list->item[i]);
+                *item = _list->item[i];
             } else {
                 _newlist->item[j++] = _list->item[i];
             }
         }
-    } while(!synchronize(ctx, sync, &list->list, _list, _newlist));
+    } while(!synchronizep(ctx, sync, &list.ptr->list, _list, _newlist));
     dbfree(_list, 0xf4);
     return 0;
 }
 
-int dblist_insert(pgctx_t *ctx, dbtype_t *list, int n, dbtype_t *item, int sync)
+int dblist_insert(pgctx_t *ctx, dbtype_t list, int n, dbtype_t item, int sync)
 {
 	_list_t *_list, *_newlist = NULL;
 	int sz, i, j;
-	assert(list->type == List);
+
+    list.ptr = dbptr(ctx, list);
+	assert(list.ptr->type == List);
     // Read-Copy-Update loop for modify operations
     do {
-        _list = _ptr(ctx, list->list);
+        _list = dbptr(ctx, list.ptr->list);
 
         // INT_MAX is a magic value that means append
         if (n == INT_MAX) n = _list->len;
@@ -124,39 +132,40 @@ int dblist_insert(pgctx_t *ctx, dbtype_t *list, int n, dbtype_t *item, int sync)
         if (n<0) n += _list->len;
         if (n < 0 || n > _list->len)
             return -1;
-        sz = dblist_size(ctx, list, 1);
+        sz = dblist_size(_list, 1);
         dbfree(_newlist, 0xf5);
         _newlist = dballoc(ctx, sz);
         _newlist->type = _InternalList;
         _newlist->len = _list->len + 1;
         for(i=j=0; i<_newlist->len; i++) {
             if (i == n) {
-                _newlist->item[i] = _offset(ctx, item);
+                _newlist->item[i] = item; 
             } else {
                 _newlist->item[i] = _list->item[j++];
             }
         }
-    } while(!synchronize(ctx, sync, &list->list, _list, _newlist));
+    } while(!synchronizep(ctx, sync, &list.ptr->list, _list, _newlist));
     dbfree(_list, 0xf6);
     return 0;
 }
 
-int dblist_append(pgctx_t *ctx, dbtype_t *list, dbtype_t *item, int sync)
+int dblist_append(pgctx_t *ctx, dbtype_t list, dbtype_t item, int sync)
 {
     return dblist_insert(ctx, list, INT_MAX, item, sync);
 }
 
-int dblist_extend(pgctx_t *ctx, dbtype_t *list, int n, extendcb_t elem, void *user, int sync)
+int dblist_extend(pgctx_t *ctx, dbtype_t list, int n, extendcb_t elem, void *user, int sync)
 {
 	_list_t *_list, *_newlist = NULL;
 	int sz, i, j;
-    dbtype_t *item;
-	assert(list->type == List);
+    dbtype_t item;
 
+    list.ptr = dbptr(ctx, list);
+	assert(list.ptr->type == List);
     // Read-Copy-Update loop for modify operations
     do {
-	    _list = _ptr(ctx, list->list);
-        sz = dblist_size(ctx, list, n);
+	    _list = dbptr(ctx, list.ptr->list);
+        sz = dblist_size(_list, n);
         dbfree(_newlist, 0xf7);
         _newlist = dballoc(ctx, sz);
         _newlist->type = _InternalList;
@@ -168,22 +177,24 @@ int dblist_extend(pgctx_t *ctx, dbtype_t *list, int n, extendcb_t elem, void *us
             if (elem(ctx, j, &item, user) < 0) {
                 return -1;
             }
-            _newlist->item[i] = _offset(ctx, item);
+            _newlist->item[i] = item;
         }
-    } while(!synchronize(ctx, sync, &list->list, _list, _newlist));
+    } while(!synchronizep(ctx, sync, &list.ptr->list, _list, _newlist));
     dbfree(_list, 0xf8);
     return 0;
 }
 
-int dblist_remove(pgctx_t *ctx, dbtype_t *list, dbtype_t *item, int sync)
+int dblist_remove(pgctx_t *ctx, dbtype_t list, dbtype_t item, int sync)
 {
 	_list_t *_list, *_newlist = NULL;
 	int sz, i, j, remove;
-	assert(list->type == List);
+
+    list.ptr = dbptr(ctx, list);
+	assert(list.ptr->type == List);
     // Read-Copy-Update loop for modify operations
     do {
-	    _list = _ptr(ctx, list->list);
-        sz = dblist_size(ctx, list, 0);
+	    _list = dbptr(ctx, list.ptr->list);
+        sz = dblist_size(_list, 0);
         dbfree(_newlist, 0xf9);
         _newlist = dballoc(ctx, sz);
         _newlist->type = _InternalList;
@@ -192,31 +203,33 @@ int dblist_remove(pgctx_t *ctx, dbtype_t *list, dbtype_t *item, int sync)
         for(i=j=0; i<_list->len; i++) {
             // Copy all items that don't match.  Only remove
             // one matching item
-            if (!remove && dbcmp(ctx, _ptr(ctx, _list->item[i]), item) == 0) {
+            if (!remove && dbcmp(ctx, _list->item[i], item) == 0) {
                 remove = 1;
             } else {
                 _newlist->item[j++] = _list->item[i];
             }
         }
         if (!remove) {
+            dbfree(_newlist, 0xfa);
             // No item was removed, so discard the copy (no one will
             // ever see it) and return an error
             return -1;
         }
-    } while(!synchronize(ctx, sync, &list->list, _list, _newlist));
-    dbfree(_list, 0xfa);
+    } while(!synchronizep(ctx, sync, &list.ptr->list, _list, _newlist));
+    dbfree(_list, 0xfb);
     return 0;
 }
 
-int dblist_contains(pgctx_t *ctx, dbtype_t *list, dbtype_t *item)
+int dblist_contains(pgctx_t *ctx, dbtype_t list, dbtype_t item)
 {
 	_list_t *_list;
 	int i;
-	assert(list->type == List);
 
-	_list = _ptr(ctx, list->list);
+    list.ptr = dbptr(ctx, list);
+	assert(list.ptr->type == List);
+    _list = dbptr(ctx, list.ptr->list);
     for(i=0; i<_list->len; i++) {
-        if (dbcmp(ctx, _ptr(ctx, _list->item[i]), item) == 0)
+        if (dbcmp(ctx, _list->item[i], item) == 0)
             return 1;
     }
     return 0;

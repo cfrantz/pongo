@@ -9,8 +9,8 @@ static PyObject *uuid_constructor;
 PyObject *pongo_id;
 PyObject *pongo_newkey = Py_None;
 
-static dbtype_t *
-pongo_newkey_helper(pgctx_t *ctx, dbtype_t *value)
+static dbtype_t
+pongo_newkey_helper(pgctx_t *ctx, dbtype_t value)
 {
     // FIXME: something wrong here.
     PyObject *ob;
@@ -19,7 +19,7 @@ pongo_newkey_helper(pgctx_t *ctx, dbtype_t *value)
         value = from_python(ctx, ob);
         Py_DECREF(ob);
     } else {
-        value = NULL;
+        value = DBNULL;
     }
     return value;
 }
@@ -31,14 +31,15 @@ typedef struct {
 } tphelper_t;
 
 static void
-to_python_helper(pgctx_t *ctx, dbtype_t *node, void *user)
+to_python_helper(pgctx_t *ctx, dbtype_t node, void *user)
 {
     tphelper_t *h = (tphelper_t*)user;
     PyObject *k, *v;
 
+    node.ptr = dbptr(ctx, node);
     if (h->type == Collection) {
-        k = to_python(ctx, _ptr(ctx, node->key), h->proxy);
-        v = to_python(ctx, _ptr(ctx, node->value), h->proxy);
+        k = to_python(ctx, node.ptr->key, h->proxy);
+        v = to_python(ctx, node.ptr->value, h->proxy);
         PyDict_SetItem(h->ob, k, v);
         Py_DECREF(k); Py_DECREF(v);
     } else {
@@ -47,10 +48,16 @@ to_python_helper(pgctx_t *ctx, dbtype_t *node, void *user)
 }
 
 PyObject *
-to_python(pgctx_t *ctx, dbtype_t *db, int proxy)
+to_python(pgctx_t *ctx, dbtype_t db, int proxy)
 {
+    dbtag_t type;
+    dbval_t *dv = NULL;
     PyObject *ob = NULL;
     PyObject *k, *v;
+    epstr_t ea;
+    epfloat_t fa;
+    char *ma = NULL;
+    uint32_t len = 0;
     _list_t *list;
     _obj_t *obj;
     struct tm tm;
@@ -60,16 +67,32 @@ to_python(pgctx_t *ctx, dbtype_t *db, int proxy)
     int64_t ival;
     tphelper_t h;
 
-    if (db == NULL)
+    if (db.all == 0)
         Py_RETURN_NONE;
 
-    switch(db->type) {
+    type = db.type;
+    if (type == ByteBuffer || type == String) {
+        ea.all = db.all;
+        len = ea.len;
+        ea.val[len] = 0;
+        ma = (char*)ea.val;
+    } else if (isPtr(type)) {
+        dv = dbptr(ctx, db);
+        type = dv->type;
+        if (type == ByteBuffer || type == String) {
+            len = dv->len;
+            ma = (char*)dv->sval;
+        }
+    }
+
+
+    switch(type) {
         case Boolean:
-            ob = db->bval ? Py_True : Py_False;
+            ob = db.val ? Py_True : Py_False;
             Py_INCREF(ob);
             break;
         case Int:
-            ival = db->ival;
+            ival = db.val;
             if (ival < LONG_MIN || ival > LONG_MAX) {
                 ob = PyLong_FromLongLong(ival);
             } else {
@@ -77,22 +100,23 @@ to_python(pgctx_t *ctx, dbtype_t *db, int proxy)
             }
             break;
         case Float:
-            ob = PyFloat_FromDouble(db->fval);
+            fa.ival = (int64_t)db.val << 4;
+            ob = PyFloat_FromDouble(fa.fval);
             break;
 #ifdef WANT_UUID_TYPE
         case Uuid:
-            ob = PyObject_CallFunction(uuid_constructor, "Os#", Py_None, db->uuval, 16);
+            ob = PyObject_CallFunction(uuid_constructor, "Os#", Py_None, dv->uuval, 16);
             break;
 #endif
         case ByteBuffer:
-            ob = PyString_FromStringAndSize((const char*)db->sval, db->len);
+            ob = PyString_FromStringAndSize(ma, len);
             break;
         case String:
-            ob = PyUnicode_FromStringAndSize((const char*)db->sval, db->len);
+            ob = PyUnicode_FromStringAndSize(ma, len);
             break;
         case Datetime:
-            time = db->utctime / 1000000LL;
-            usec = db->utctime % 1000000LL;
+            time = db.val / 1000000LL;
+            usec = db.val % 1000000LL;
 #ifdef WIN32
             memcpy(&tm, gmtime(&time), sizeof(tm));
 #else
@@ -108,10 +132,10 @@ to_python(pgctx_t *ctx, dbtype_t *db, int proxy)
                 pidcache_put(ctx, ob, db);
             } else {
                 if (proxy == -1) proxy = 1;
-                list = _ptr(ctx, db->list);
+                list = dbptr(ctx, dv->list);
                 ob = PyList_New(0);
                 for(i=0; i<list->len; i++) {
-                    v = to_python(ctx, _ptr(ctx, list->item[i]), proxy);
+                    v = to_python(ctx, list->item[i], proxy);
                     PyList_Append(ob, v);
                     Py_DECREF(v);
                 }
@@ -123,11 +147,11 @@ to_python(pgctx_t *ctx, dbtype_t *db, int proxy)
                 pidcache_put(ctx, ob, db);
             } else {
                 if (proxy == -1) proxy = 1;
-                obj = _ptr(ctx, db->obj);
+                obj = dbptr(ctx, dv->obj);
                 ob = PyDict_New();
                 for(i=0; i<obj->len; i++) {
-                    k = to_python(ctx, _ptr(ctx, obj->item[i].key), proxy);
-                    v = to_python(ctx, _ptr(ctx, obj->item[i].value), proxy);
+                    k = to_python(ctx, obj->item[i].key, proxy);
+                    v = to_python(ctx, obj->item[i].value, proxy);
                     PyDict_SetItem(ob, k, v);
                     Py_DECREF(k); Py_DECREF(v);
                 }
@@ -144,16 +168,16 @@ to_python(pgctx_t *ctx, dbtype_t *db, int proxy)
                 h.proxy = proxy;
                 h.type = Collection;
                 h.ob = ob = PyDict_New();
-                bonsai_foreach(ctx, _ptr(ctx, db->obj), to_python_helper, &h);
+                bonsai_foreach(ctx, dv->obj, to_python_helper, &h);
             }
             break;
         default:
-            PyErr_Format(PyExc_Exception, "Cannot handle dbtype %d", db->type);
+            PyErr_Format(PyExc_Exception, "Cannot handle dbtype %d", type);
     }
     return ob;
 }
 
-static int sequence_cb(pgctx_t *ctx, int i, dbtype_t **item, void *user)
+static int sequence_cb(pgctx_t *ctx, int i, dbtype_t *item, void *user)
 {
     PyObject *seq = (PyObject*)user;
     *item = from_python(ctx, PySequence_GetItem(seq, i));
@@ -161,7 +185,7 @@ static int sequence_cb(pgctx_t *ctx, int i, dbtype_t **item, void *user)
     return 0;
 }
 
-static int mapping_cb(pgctx_t *ctx, int i, dbtype_t **key, dbtype_t **value, void *user)
+static int mapping_cb(pgctx_t *ctx, int i, dbtype_t *key, dbtype_t *value, void *user)
 {
     PyObject *map = (PyObject*)user;
     PyObject *item = PySequence_GetItem(map, i);
@@ -171,7 +195,7 @@ static int mapping_cb(pgctx_t *ctx, int i, dbtype_t **key, dbtype_t **value, voi
     return 0;
 }
 
-static int itermapping_cb(pgctx_t *ctx, int i, dbtype_t **key, dbtype_t **value, void *user)
+static int itermapping_cb(pgctx_t *ctx, int i, dbtype_t *key, dbtype_t *value, void *user)
 {
     PyObject *iter = (PyObject*)user;
     PyObject *item = PyIter_Next(iter);
@@ -181,10 +205,10 @@ static int itermapping_cb(pgctx_t *ctx, int i, dbtype_t **key, dbtype_t **value,
     return 0;
 }
 
-dbtype_t *
+dbtype_t
 from_python(pgctx_t *ctx, PyObject *ob)
 {
-    dbtype_t *db = NULL;
+    dbtype_t db;
     char *buf;
     Py_ssize_t length;
     PyObject *items;
@@ -195,10 +219,10 @@ from_python(pgctx_t *ctx, PyObject *ob)
     if (PyObject_HasAttrString(ob, "__topongo__")) {
         ob = PyObject_CallMethod(ob, "__topongo__", NULL);
         if (PyErr_Occurred())
-            return NULL;
+            return DBNULL;
     }
     if (ob == Py_None) {
-        db = NULL;
+        db = DBNULL;
     } else if (PyBool_Check(ob)) {
         db = dbboolean_new(ctx, ob == Py_True);
     } else if (PyInt_Check(ob)) {
@@ -253,19 +277,19 @@ from_python(pgctx_t *ctx, PyObject *ob)
     } else if (Py_TYPE(ob) == &PongoList_Type) {
         // Resolve proxy types back to their original dbtype
         PongoList *p = (PongoList*)ob;
-        db = _ptr(p->ctx, p->dblist);
+        db = p->dblist;
     } else if (Py_TYPE(ob) == &PongoDict_Type) {
         // Resolve proxy types back to their original dbtype
         PongoDict *p = (PongoDict*)ob;
-        db = _ptr(p->ctx, p->dbobj);
+        db = p->dbobj;
     } else if (Py_TYPE(ob) == &PongoCollection_Type) {
         // Resolve proxy types back to their original dbtype
         PongoCollection *p = (PongoCollection*)ob;
-        db = _ptr(p->ctx, p->dbcoll);
+        db = p->dbcoll;
     } else {
         // FIXME: Unknown object type
         PyErr_SetObject(PyExc_TypeError, (PyObject*)Py_TYPE(ob));
-        db = NULL;
+        db = DBNULL;
     }
     return db;
 }
@@ -297,7 +321,7 @@ int
 pongo_check(PongoCollection *data)
 {
     if ((Py_TYPE(data) != &PongoDict_Type && Py_TYPE(data) != &PongoCollection_Type) ||
-        data->dbcoll != data->ctx->root->data) {
+        data->dbcoll.all != data->ctx->root->data.all) {
             PyErr_Format(PyExc_TypeError, "Argument must be a Pongo root object");
             return -1;
     }
@@ -340,8 +364,8 @@ pongo_meta(PyObject *self, PyObject *args)
         ret = PyLong_FromLongLong(ctx->root->meta.chunksize);
         if (value && value != Py_None) ctx->root->meta.chunksize = PyInt_AsLong(value);
     } else if (!strcmp(key, "id")) {
-        ret = to_python(ctx, _ptr(ctx, ctx->root->meta.id), 0);
-        if (value) ctx->root->meta.id = _offset(ctx, from_python(ctx, value));
+        ret = to_python(ctx, ctx->root->meta.id, 0);
+        if (value) ctx->root->meta.id = from_python(ctx, value);
     } else if (!strcmp(key, ".sync")) {
         ret = PyInt_FromLong(ctx->sync);
         if (value && value != Py_None) ctx->sync = PyInt_AsLong(value);
@@ -402,7 +426,7 @@ pongo_pidcache(PyObject *self, PyObject *args)
 {
     PyObject *ret;
     PongoCollection *data;
-    dbtype_t *pidcache;
+    dbtype_t pidcache;
 
     if (!PyArg_ParseTuple(args, "O:atoms", &data))
         return NULL;
@@ -410,7 +434,7 @@ pongo_pidcache(PyObject *self, PyObject *args)
         return NULL;
 
     dblock(data->ctx);
-    pidcache = _ptr(data->ctx, data->ctx->root->pidcache);
+    pidcache = data->ctx->root->pidcache;
     // Create the collection directly because the pidcache is
     // already accounted for by pongogc, so we don't need to
     // have the proxy reference inserted into the pidcache
@@ -426,14 +450,14 @@ pongo__object(PyObject *self, PyObject *args)
     PyObject *ob;
     PongoCollection *data;
     uint64_t offset;
-    dbtype_t *db;
+    dbtype_t db;
 
     if (!PyArg_ParseTuple(args, "OL:_object", &data, &offset))
         return NULL;
     if (pongo_check(data))
         return NULL;
 
-    db = _ptr(data->ctx, offset);
+    db.all = offset;
     dblock(data->ctx);
     ob = to_python(data->ctx, db, 1);
     dbunlock(data->ctx);
@@ -459,13 +483,13 @@ static PyObject *
 pongo__show(PyObject *self, PyObject *args)
 {
     PongoCollection *data;
-    dbtype_t *coll;
+    dbtype_t coll;
 
     if (!PyArg_ParseTuple(args, "O:_info", &data))
         return NULL;
 
-    coll = _ptr(data->ctx, data->dbcoll);
-    bonsai_show(data->ctx, _ptr(data->ctx, coll->obj), 0);
+    coll.ptr = dbptr(data->ctx, data->dbcoll);
+    bonsai_show(data->ctx,  coll.ptr->obj, 0);
     Py_RETURN_NONE;
 }
 

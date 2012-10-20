@@ -15,18 +15,20 @@
 	uu+12, uu+13, uu+14, uu+15, n
 
 
-static void stack_put(jsonctx_t *ctx, dbtype_t *value)
+static void stack_put(jsonctx_t *ctx, dbtype_t value)
 {
-	dbtype_t *top = ctx->stack[ctx->depth];
+	dbtype_t top = ctx->stack[ctx->depth];
+    dbtag_t type = dbtype(ctx->dbctx, top);
+
 	if (ctx->depth == 0) {
 		ctx->stack[0] = value;
-	} else if (top->type == List) {
+	} else if (type == List) {
 		dblist_append(ctx->dbctx, top, value, NOSYNC);
-	} else if (top->type == Object) {
-        dbtype_t *key = ctx->key[ctx->depth];
+	} else if (type == Object) {
+        dbtype_t key = ctx->key[ctx->depth];
         dbobject_setitem(ctx->dbctx, top, key, value, NOSYNC);
 	} else {
-		log_error("Top of parse stack is neither List nor Object (%d)", top->type);
+		log_error("Top of parse stack is neither List nor Object (%d)", type);
 		abort();
 	}
 }
@@ -35,7 +37,7 @@ static int json_null(void *ctx)
 {
 	jsonctx_t *c = (jsonctx_t*)ctx;
 	//log_verbose("value: null\n");
-	stack_put(c, NULL);
+	stack_put(c, DBNULL);
 	return 1;
 }
 
@@ -67,7 +69,7 @@ static int json_string(void *ctx, const unsigned char *value, size_t len)
 {
 	jsonctx_t *c = (jsonctx_t*)ctx;
     const char *val = (const char *)value;
-    dbtype_t *s;
+    dbtype_t s;
     uint8_t buf[16];
     int64_t dt;
     int n = 0;
@@ -95,7 +97,7 @@ static int json_map_start(void *ctx)
 static int json_map_key(void *ctx, const unsigned char *key, size_t len)
 {
 	jsonctx_t *c = (jsonctx_t*)ctx;
-	dbtype_t *k = dbstring_new(c->dbctx, (const char*)key, len);
+	dbtype_t k = dbstring_new(c->dbctx, (const char*)key, len);
 	//log_verbose("key: %s (len=%d)\n", k->sval, len);
 	c->key[c->depth] = k;
 	return 1;
@@ -133,7 +135,7 @@ static dbtype_t *json_custom_type(void *ctx, dbtype_t *json)
 static int json_map_end(void *ctx)
 {
 	jsonctx_t *c = (jsonctx_t*)ctx;
-	dbtype_t *obj = c->stack[c->depth--];
+	dbtype_t obj = c->stack[c->depth--];
 	//obj = json_custom_type(ctx, obj);
 	//log_verbose("map: }\n");
 	stack_put(c, obj);
@@ -151,7 +153,7 @@ static int json_array_start(void *ctx)
 static int json_array_end(void *ctx)
 {
 	jsonctx_t *c = (jsonctx_t*)ctx;
-	dbtype_t *list = c->stack[c->depth--];
+	dbtype_t list = c->stack[c->depth--];
 	//log_verbose("array: ]\n");
 	stack_put(c, list);
 	return 1;
@@ -187,37 +189,59 @@ static void json_print(void *ctx, const char *str, size_t len)
     c->outstr[c->outlen] = 0;
 }
 
-static void collection_helper(pgctx_t *ctx, dbtype_t *node, void *user)
+static void collection_helper(pgctx_t *ctx, dbtype_t node, void *user)
 {
     jsonctx_t *j = (jsonctx_t*)user;
-    json_emit(j, _ptr(ctx, node->key));
-    json_emit(j, _ptr(ctx, node->value));
+    node.ptr = dbptr(ctx, node);
+    json_emit(j, node.ptr->key);
+    json_emit(j, node.ptr->value);
 }
 
-char *json_emit(jsonctx_t *ctx, dbtype_t *db)
+char *json_emit(jsonctx_t *ctx, dbtype_t db)
 {
 	yajl_gen g = ctx->json.generator;
+    dbtag_t type;
+    epstr_t ea;
+    epfloat_t fa;
+    uint8_t *ma = NULL;
+    uint32_t len = 0;
     _list_t *list;
     _obj_t *obj;
 	int i;
 	char buf[64];
     uint8_t *uu;
 
-	if (db == NULL) {
+	if (db.all == 0) {
 		yajl_gen_null(g);
         return ctx->outstr;
 	}
 
-	switch(db->type) {
+    type = db.type;
+    if (type == String || type == ByteBuffer) {
+        ea.all = db.all;
+        len = ea.len;
+        ea.val[len] = 0;
+        ma = ea.val;
+    } else if (isPtr(type)) {
+        db.ptr = dbptr(ctx->dbctx, db);
+        type = db.ptr->type;
+        if (type == String || type == ByteBuffer) {
+            len = db.ptr->len;
+            ma = db.ptr->sval;
+        }
+    }
+
+	switch(type) {
 		case Boolean:
-			yajl_gen_bool(g, db->bval); break;
+			yajl_gen_bool(g, db.val); break;
 		case Int:
-			yajl_gen_integer(g, db->ival); break;
+			yajl_gen_integer(g, db.val); break;
 		case Float:
-			yajl_gen_double(g, db->fval); break;
+            fa.ival = (int64_t)db.val << 4;
+			yajl_gen_double(g, fa.fval); break;
 		case ByteBuffer:
 		case String:
-			yajl_gen_string(g, db->sval, db->len); break;
+			yajl_gen_string(g, ma, len); break;
 		case Uuid:
 #if 0
 			yajl_gen_config(g, yajl_gen_beautify, 0);
@@ -238,7 +262,7 @@ char *json_emit(jsonctx_t *ctx, dbtype_t *db)
 			yajl_gen_map_close(g);
 			yajl_gen_config(g, yajl_gen_beautify, 1);
 #else
-			uu = db->uuval;
+			uu = db.ptr->uuval;
 			i = sprintf(buf, "uuid(%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x)",
 					uu[0], uu[1], uu[2], uu[3],
 					uu[4], uu[5], uu[6], uu[7],
@@ -261,34 +285,34 @@ char *json_emit(jsonctx_t *ctx, dbtype_t *db)
 			yajl_gen_map_close(g);
 			yajl_gen_config(g, yajl_gen_beautify, 1);
 #else
-                        i = sprintf(buf, "datetime(%" PRId64 ")", db->utctime);
+                        i = sprintf(buf, "datetime(%" PRId64 ")", (int64_t)db.val);
 			yajl_gen_string(g, UC(buf), i); break;
 #endif
 			break;
 		case List:
 			yajl_gen_array_open(g);
-            list = _ptr(ctx->dbctx, db->list);
+            list = dbptr(ctx->dbctx, db.ptr->list);
 			for(i=0; i<list->len; i++)
-				json_emit(ctx, _ptr(ctx->dbctx, list->item[i]));
+				json_emit(ctx, list->item[i]);
 			yajl_gen_array_close(g);
 			break;
 		case Object:
 			yajl_gen_map_open(g);
-            obj = _ptr(ctx->dbctx, db->obj);
+            obj = dbptr(ctx->dbctx, db.ptr->obj);
 			for(i=0; i<obj->len; i++) {
-				json_emit(ctx, _ptr(ctx->dbctx, obj->item[i].key));
-   				json_emit(ctx, _ptr(ctx->dbctx, obj->item[i].value));
+				json_emit(ctx, obj->item[i].key);
+   				json_emit(ctx, obj->item[i].value);
 			}
 			yajl_gen_map_close(g);
 			break;
 		case Collection:
 		case Cache:
 			yajl_gen_map_open(g);
-            bonsai_foreach(ctx->dbctx, _ptr(ctx->dbctx, db->obj), collection_helper, ctx);
+            bonsai_foreach(ctx->dbctx, db.ptr->obj, collection_helper, ctx);
 			yajl_gen_map_close(g);
             break;
 		default:
-			log_error("Unknown type: %d at %p\n", db->type, db);
+			log_error("Unknown type: %d at %" PRIx64 "\n", type, db.all);
 
 	}
     return ctx->outstr;
@@ -320,12 +344,12 @@ void json_cleanup(jsonctx_t *ctx)
     free(ctx);
 }
 
-dbtype_t *json_parse(jsonctx_t *ctx, char *buf, int len)
+dbtype_t json_parse(jsonctx_t *ctx, char *buf, int len)
 {
     if (len == -1)
         len = strlen(buf);
     yajl_parse(ctx->json.parser, UC(buf), len);
-    return (ctx->depth == 0) ? ctx->stack[0] : NULL;
+    return (ctx->depth == 0) ? ctx->stack[0] : DBNULL;
 }
 
 // vim: ts=4 sts=4 sw=4 expandtab:

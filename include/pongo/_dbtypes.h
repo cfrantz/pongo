@@ -16,6 +16,8 @@ typedef enum {
 	Float =		0x05,
 	ByteBuffer =0x06,
 	String =	0x07,
+    PtrAlias =  0x08,
+    Error =     0x0f,
 
 	// Container types (129-...)
 	List =		0x81,
@@ -29,15 +31,30 @@ typedef enum {
 	_BonsaiNode=	0xc3
 } dbtag_t;
 
+#define isPtr(type) ((type & 7) == 0)
+
+struct _dbval;
+typedef struct _dbval dbval_t;
+
+typedef union _dbtype {
+    struct {
+        uint64_t type :4;
+        int64_t val: 60;
+    };
+    uint64_t all;
+    dbval_t *ptr;
+} dbtype_t;
+
+
 #define DBROOT_SIG "PongoDB"
 typedef struct _dbroot {
     uint8_t signature[16];      // 0    +16 bytes
     uint16_t version[4];        // 16   +8 bytes
     uint64_t _pad0;             // 24   +8 bytes
 	uint64_t heap;				// 32   +8 bytes
-	uint64_t data;				// 40   +8 bytes
-	uint64_t cache;				// 48	+8 bytes
-	uint64_t pidcache;			// 56   +8 bytes
+	dbtype_t data;				// 40   +8 bytes
+	dbtype_t cache;				// 48	+8 bytes
+	dbtype_t pidcache;			// 56   +8 bytes
 	uint64_t booleans[2];		// 64	+16 bytes
 	uint64_t lock;				// 80   +8 bytes
 	uint64_t resize; 	        // 88   +8 bytes
@@ -48,17 +65,12 @@ typedef struct _dbroot {
 	uint8_t _pad1[3072-112];	// 112
 	struct __meta {
 		uint64_t chunksize;		// 3072 + 8 bytes
-		uint64_t id;			// 3080 + 8 bytes
+		dbtype_t id;			// 3080 + 8 bytes
 	} meta;
 	uint8_t _pad2[1024-sizeof(struct __meta)];
 						// 4096 bytes
 } dbroot_t;
-	
-typedef struct {
-	dbtag_t type;
-	uint32_t _pad;
-	uint64_t bval;
-} dbboolean_t;
+
 
 typedef struct {
 	dbtag_t type;
@@ -95,18 +107,18 @@ typedef struct {
 	dbtag_t type;
 	uint32_t _pad[2];
 	uint32_t len;
-	uint64_t item[];
+	dbtype_t item[];
 } _list_t;
 
 typedef struct {
 	dbtag_t type;
 	uint32_t _pad;
-	uint64_t list;
+	dbtype_t list;
     uint8_t _extra[48];
 } dblist_t;
 
 typedef struct  {
-	uint64_t key, value;
+	dbtype_t key, value;
 } _objitem_t;
 
 typedef struct {
@@ -141,42 +153,21 @@ typedef struct {
 	dbtag_t type;
 	uint32_t _pad;
 	uint64_t size;
-	uint64_t left, right;
-	uint64_t key, value;
+	dbtype_t left, right;
+	dbtype_t key, value;
 } dbnode_t;
 
-#if 0
-typedef union {
-	dbtag_t type;
-	dbboolean_t;
-	dbint_t;
-	dbfloat_t;
-	dbstring_t;
-	dbuuid_t;
-	dbtime_t;
-	dblist_t;
-	dbobject_t;
-	dbcollection_t;
-	dbcache_t;
-	dbnode_t;
-} dbtype_t;
-#else
-typedef struct {
+struct _dbval {
 	dbtag_t type;
 	union {
 		struct {
 			uint32_t _pad;
 			union {
-				int64_t bval;
-				int64_t ival;
-				int64_t utctime;
-				double fval;
-				volatile uint64_t list;
-				volatile uint64_t cache;
+                // put primitive types like fval or ival here
 				struct {
 					uint64_t size;
-					uint64_t left, right;
-					uint64_t key, value;
+					dbtype_t left, right;
+					dbtype_t key, value;
 				};
 			};
 		};
@@ -192,12 +183,29 @@ typedef struct {
 		struct {
 			volatile uint32_t refcnt; // used only by pidcache.  _pad for everyone else
 			union {
-				volatile uint64_t obj;
+				volatile dbtype_t list;
+				volatile dbtype_t obj;
+				volatile dbtype_t cache;
 			};
 		};
 	};
-} dbtype_t;
-#endif
+};
+
+typedef union _extra_super_primitive_string {
+    struct {
+        uint8_t type: 4,
+                len: 4;
+        uint8_t val[8];
+    };
+    uint64_t all;
+} epstr_t;
+
+typedef union _extra_super_primitive_float {
+    double fval;
+    int64_t ival;
+} epfloat_t;
+
+
 #pragma pack()
 
 // vim: ts=4 sts=4 sw=4 expandtab:

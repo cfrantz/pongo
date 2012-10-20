@@ -6,7 +6,7 @@
  ************************************************************************/
 
 PyObject*
-PongoList_Proxy(pgctx_t *ctx, dbtype_t *db)
+PongoList_Proxy(pgctx_t *ctx, dbtype_t db)
 {
     PongoList *self;
 
@@ -15,14 +15,14 @@ PongoList_Proxy(pgctx_t *ctx, dbtype_t *db)
         return NULL;
 
     self->ctx = ctx;
-    self->dblist = _offset(ctx, db);
+    self->dblist = db;
     return (PyObject *)self;
 }
 
 static PyObject*
 PongoList_GetItem(PongoList *self, Py_ssize_t i)
 {
-    dbtype_t *item;
+    dbtype_t item;
     PyObject *ret = NULL;
 
     dblock(self->ctx);
@@ -39,7 +39,7 @@ PongoList_GetItem(PongoList *self, Py_ssize_t i)
 static int
 PongoList_SetItem(PongoList *self, Py_ssize_t i, PyObject *v)
 {
-    dbtype_t *item;
+    dbtype_t item;
     int ret = -1;
 
     dblock(self->ctx);
@@ -66,7 +66,7 @@ PongoList_append(PongoList *self, PyObject *args, PyObject *kwargs)
     PyObject *v;
     int sync = self->ctx->sync;
     char *kwlist[] = {"value", "sync", NULL};
-    dbtype_t *item;
+    dbtype_t item;
 
     if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|i:append", kwlist,
                 &v, &sync))
@@ -88,7 +88,7 @@ PongoList_insert(PongoList *self, PyObject *args, PyObject *kwargs)
     PyObject *v;
     int sync = self->ctx->sync;
     PyObject *ret = NULL;
-    dbtype_t *item;
+    dbtype_t item;
     char *kwlist[] = {"value", "sync", NULL};
 
     if (!PyArg_ParseTupleAndKeywords(args, kwargs, "nO|i:insert", kwlist,
@@ -112,7 +112,7 @@ static PyObject *
 PongoList_remove(PongoList *self, PyObject *args, PyObject *kwargs)
 {
     PyObject *ret = NULL;
-    dbtype_t *item;
+    dbtype_t item;
     PyObject *v;
     int sync = self->ctx->sync;
     char *kwlist[] = {"value", "sync", NULL};
@@ -137,7 +137,7 @@ static PyObject *
 PongoList_pop(PongoList *self, PyObject *args, PyObject *kwargs)
 {
     Py_ssize_t i = -1;
-    dbtype_t *item;
+    dbtype_t item;
     PyObject *ret = NULL;
     int sync = self->ctx->sync;
     char *kwlist[] = {"n", "sync", NULL};
@@ -169,7 +169,7 @@ PongoList_length(PongoList *self)
 static int
 PongoList_contains(PongoList *self, PyObject *elem)
 {
-    dbtype_t *item;
+    dbtype_t item;
     int ret = 0;
 
     dblock(self->ctx);
@@ -196,7 +196,7 @@ PongoList_create(PyObject *self, PyObject *arg)
 {
     PyObject *ret;
     PongoCollection *ref = (PongoCollection*)arg;
-    dbtype_t *list;
+    dbtype_t list;
 
     if (pongo_check(ref))
         return NULL;
@@ -213,7 +213,7 @@ PongoList_repr(PyObject *ob)
 {
     PongoList *self = (PongoList*)ob;
     char buf[32];
-    sprintf(buf, "0x%" PRIx64, self->dblist);
+    sprintf(buf, "0x%" PRIx64, self->dblist.all);
     return PyString_FromFormat("PongoList(%p, %s)", self->ctx, buf);
 }
 

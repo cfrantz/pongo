@@ -17,6 +17,13 @@ usage(const char *progname)
     return 1;
 }
 
+void
+print_meminfo(pgctx_t *ctx)
+{
+    memheap_t *heap = _ptr(ctx, ctx->root->heap);
+    pmem_print_mem(&ctx->mm, heap);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -26,6 +33,7 @@ main(int argc, char *argv[])
     char *dbfile = NULL;
     int64_t t0, t1;
     pgctx_t *ctx;
+    int info = 0;
 
     for(i=1; i<argc; i++) {
         if (!strcmp(argv[i], "-l")) {
@@ -34,6 +42,8 @@ main(int argc, char *argv[])
             short_interval = atof(argv[++i]) * 1e6;
         } else if (!strcmp(argv[i], "-f")) {
             dbfile = argv[++i];
+        } else if (!strcmp(argv[i], "-i")) {
+            info = 1;
         } else {
             return usage(argv[0]);
         }
@@ -46,6 +56,11 @@ main(int argc, char *argv[])
     printf("   long_interval=%uus\n", long_interval);
     log_init(NULL, LOG_DEBUG);
     ctx = dbfile_open(dbfile, 0);
+    if (info) {
+        print_meminfo(ctx);
+        return 0;
+    }
+
     db_gc(ctx, 1, NULL);
     t0 = utime_now();
     for(;;) {

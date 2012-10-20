@@ -8,7 +8,7 @@
  ************************************************************************/
 
 PyObject*
-PongoCollection_Proxy(pgctx_t *ctx, dbtype_t *db)
+PongoCollection_Proxy(pgctx_t *ctx, dbtype_t db)
 {
     PongoCollection *self;
 
@@ -17,14 +17,14 @@ PongoCollection_Proxy(pgctx_t *ctx, dbtype_t *db)
         return NULL;
 
     self->ctx = ctx;
-    self->dbcoll = _offset(ctx, db);
+    self->dbcoll = db;
     return (PyObject *)self;
 }
 
 static PyObject *
 PongoCollection_GetItem(PongoCollection *self, PyObject *key)
 {
-    dbtype_t *k, *v;
+    dbtype_t k, v;
     PyObject *ret = NULL;
 
     dblock(self->ctx);
@@ -43,8 +43,8 @@ PongoCollection_GetItem(PongoCollection *self, PyObject *key)
 static int
 PongoCollection_SetItem(PongoCollection *self, PyObject *key, PyObject *value)
 {
-    dbtype_t *k;
-    dbtype_t *v;
+    dbtype_t k;
+    dbtype_t v;
     int ret = -1;
 
     dblock(self->ctx);
@@ -80,7 +80,7 @@ PongoCollection_length(PongoCollection *self)
 static int
 PongoCollection_contains(PongoCollection *self, PyObject *key)
 {
-    dbtype_t *k;
+    dbtype_t k;
     int ret = 0;
 
     dblock(self->ctx);
@@ -98,7 +98,7 @@ PongoCollection_get(PongoCollection *self, PyObject *args, PyObject *kwargs)
     PyObject *key, *dflt = Py_None;
     PyObject *klist = NULL;
     PyObject *ret = NULL;
-    dbtype_t *k, *v;
+    dbtype_t k, v;
     char *sep = ".";
     char *kwlist[] = {"key", "default", "sep", NULL};
     int r;
@@ -117,7 +117,7 @@ PongoCollection_get(PongoCollection *self, PyObject *args, PyObject *kwargs)
     }
 
     if (!PyErr_Occurred()) {
-        if (k->type == List) {
+        if (dbtype(self->ctx, k) == List) {
             r = db_multi(SELF_CTX_AND_DBCOLL, k, multi_GET, &v, 0);
             if (r == 0) {
                 ret = to_python(self->ctx, v, 1);
@@ -148,7 +148,7 @@ PongoCollection_set(PongoCollection *self, PyObject *args, PyObject *kwargs)
     PyObject *key, *value;
     PyObject *klist = NULL;
     PyObject *ret = NULL;
-    dbtype_t *k=NULL, *v;
+    dbtype_t k, v;
     int sync = self->ctx->sync;
     int fail = 0;
     multi_t op = multi_SET;
@@ -159,6 +159,7 @@ PongoCollection_set(PongoCollection *self, PyObject *args, PyObject *kwargs)
                 &key, &value, &sep, &sync, &fail))
         return NULL;
 
+    k = DBNULL;
     dblock(self->ctx);
     if (PyString_Check(key) || PyUnicode_Check(key)) {
         klist = PyObject_CallMethod(key, "split", "s", sep);
@@ -173,7 +174,7 @@ PongoCollection_set(PongoCollection *self, PyObject *args, PyObject *kwargs)
     }
     v = from_python(self->ctx, value);
     if (!PyErr_Occurred()) {
-        if (k && k->type == List) {
+        if (dbtype(self->ctx, k) == List) {
             if (fail) op = multi_SET_OR_FAIL;
             if (db_multi(SELF_CTX_AND_DBCOLL, k, op, &v, sync) == 0) {
                 ret = Py_None;
@@ -202,7 +203,7 @@ PongoCollection_pop(PongoCollection *self, PyObject *args, PyObject *kwargs)
 {
     PyObject *key, *dflt = NULL;
     PyObject *ret = NULL;
-    dbtype_t *k, *v;
+    dbtype_t k, v;
     int sync = self->ctx->sync;
     char *kwlist[] = {"key", "default", "sync", NULL};
 
@@ -234,22 +235,23 @@ typedef struct {
 } kvi_t;
 
 static void
-kvi_helper(pgctx_t *ctx, dbtype_t *node, void *user)
+kvi_helper(pgctx_t *ctx, dbtype_t node, void *user)
 {
     kvi_t *kvi = (kvi_t*)user;
     PyObject *k, *v, *item;
 
+    node.ptr = dbptr(ctx, node);
     if (kvi->type == 0) {
-        item = to_python(ctx, _ptr(ctx, node->key), 1);
+        item = to_python(ctx, node.ptr->key, 1);
         PyList_Append(kvi->ob, item);
         Py_DECREF(item);
     } else if (kvi->type == 1) {
-        item = to_python(ctx, _ptr(ctx, node->value), 1);
+        item = to_python(ctx, node.ptr->value, 1);
         PyList_Append(kvi->ob, item);
         Py_DECREF(item);
     } else if (kvi->type == 2) {
-        k = to_python(ctx, _ptr(ctx, node->key), 1);
-        v = to_python(ctx, _ptr(ctx, node->value), 1);
+        k = to_python(ctx, node.ptr->key, 1);
+        v = to_python(ctx, node.ptr->value, 1);
         item = Py_BuildValue("(OO)", k, v);
         PyList_Append(kvi->ob, item);
         Py_DECREF(k); Py_DECREF(v); Py_DECREF(item);
@@ -262,14 +264,13 @@ static PyObject *
 PongoCollection_keys(PongoCollection *self)
 {
     kvi_t kvi;
-    dbtype_t *obj;
+    dbtype_t obj;
 
     kvi.type = 0;
     kvi.ob = PyList_New(0);
     dblock(self->ctx);
-    obj = _ptr(self->ctx, self->dbcoll);
-    obj = _ptr(self->ctx, obj->obj);
-    bonsai_foreach(self->ctx, obj, kvi_helper, &kvi);
+    obj.ptr = dbptr(self->ctx, self->dbcoll);
+    bonsai_foreach(self->ctx, obj.ptr->obj, kvi_helper, &kvi);
     dbunlock(self->ctx);
     return kvi.ob;
 }
@@ -278,14 +279,13 @@ static PyObject *
 PongoCollection_values(PongoCollection *self)
 {
     kvi_t kvi;
-    dbtype_t *obj;
+    dbtype_t obj;
 
     kvi.type = 1;
     kvi.ob = PyList_New(0);
     dblock(self->ctx);
-    obj = _ptr(self->ctx, self->dbcoll);
-    obj = _ptr(self->ctx, obj->obj);
-    bonsai_foreach(self->ctx, obj, kvi_helper, &kvi);
+    obj.ptr = dbptr(self->ctx, self->dbcoll);
+    bonsai_foreach(self->ctx, obj.ptr->obj, kvi_helper, &kvi);
     dbunlock(self->ctx);
     return kvi.ob;
 }
@@ -294,14 +294,13 @@ static PyObject *
 PongoCollection_items(PongoCollection *self)
 {
     kvi_t kvi;
-    dbtype_t *obj;
+    dbtype_t obj;
 
     kvi.type = 2;
     kvi.ob = PyList_New(0);
     dblock(self->ctx);
-    obj = _ptr(self->ctx, self->dbcoll);
-    obj = _ptr(self->ctx, obj->obj);
-    bonsai_foreach(self->ctx, obj, kvi_helper, &kvi);
+    obj.ptr = dbptr(self->ctx, self->dbcoll);
+    bonsai_foreach(self->ctx, obj.ptr->obj, kvi_helper, &kvi);
     dbunlock(self->ctx);
     return kvi.ob;
 }
@@ -322,14 +321,14 @@ PongoCollection_json(PongoCollection *self, PyObject *args)
     char *key = NULL, *val = NULL;
     Py_ssize_t klen, vlen;
     PyObject *ret = Py_None;
-    dbtype_t *dict, *obj, *k;
+    dbtype_t dict, obj, k;
     jsonctx_t *jctx;
 
     if (!PyArg_ParseTuple(args, "|s#s#:json", &key, &klen, &val, &vlen))
         return NULL;
 
     dblock(self->ctx);
-    dict = _ptr(self->ctx, self->dbcoll);
+    dict = self->dbcoll;
     jctx = json_init(self->ctx);
     if (key) {
         if (val) {
@@ -363,7 +362,7 @@ static PyObject *
 PongoCollection_search(PongoCollection *self, PyObject *args)
 {
     PyObject *path, *value, *ret=NULL;
-    dbtype_t *dbpath, *dbvalue, *dbrslt;
+    dbtype_t dbpath, dbvalue, dbrslt;
     char *rel;
     char *sep = ".";
     int decpath = 0;
@@ -402,7 +401,7 @@ PongoCollection_search(PongoCollection *self, PyObject *args)
     dbpath = from_python(self->ctx, path);
     if (decpath)
         Py_DECREF(path);
-    if (dbpath->type == List) {
+    if (dbtype(self->ctx, dbpath) == List) {
         dbvalue = from_python(self->ctx, value);
         if (!PyErr_Occurred()) {
             dbrslt = dbcollection_new(self->ctx);
@@ -412,7 +411,7 @@ PongoCollection_search(PongoCollection *self, PyObject *args)
             ret = to_python(self->ctx, dbrslt, -1);
         }
     } else {
-        PyErr_Format(PyExc_Exception, "path type isn't List (%d)", dbpath->type);
+        PyErr_Format(PyExc_Exception, "path type isn't List (%d)", dbtype(self->ctx, dbpath));
     }
     dbunlock(self->ctx);
     return ret;
@@ -423,7 +422,7 @@ PongoCollection_create(PyObject *self, PyObject *arg)
 {
     PyObject *ret;
     PongoCollection *ref = (PongoCollection*)arg;
-    dbtype_t *coll;
+    dbtype_t coll;
 
     if (pongo_check(ref))
         return NULL;
@@ -440,7 +439,7 @@ PongoCollection_repr(PyObject *ob)
 {
     PongoCollection *self = (PongoCollection*)ob;
     char buf[32];
-    sprintf(buf, "0x%" PRIx64, self->dbcoll);
+    sprintf(buf, "0x%" PRIx64, self->dbcoll.all);
     return PyString_FromFormat("PongoCollection(%p, %s)", self->ctx, buf);
 }
 

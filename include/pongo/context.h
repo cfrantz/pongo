@@ -8,20 +8,21 @@
 typedef struct _pgctx pgctx_t;
 struct rcuhelper {
 	unsigned len;
-	dbtype_t *addr[127];
+	dbtype_t addr[127];
 };
 
 struct _pgctx {
 	mmfile_t mm;
 	int sync;
 	dbroot_t *root;
-	dbtype_t *cache;
-	dbtype_t *data;
+	dbtype_t cache;
+	dbtype_t data;
 	// This pidcache is the pidcache for the currently running process.
 	// The pidcache in root is the reference to the entire pidcache
-	dbtype_t *pidcache;
-	dbtype_t *(*newkey)(pgctx_t *ctx, dbtype_t *value);
+	dbtype_t pidcache;
+	dbtype_t (*newkey)(pgctx_t *ctx, dbtype_t value);
 	struct rcuhelper winner, loser;
+
 };
 
 /*
@@ -33,6 +34,16 @@ static inline uint64_t _offset(pgctx_t *ctx, void *ptr)
 	return __offset(&ctx->mm, ptr);
 }
 
+static inline dbtype_t dboffset(pgctx_t *ctx, void *ptr)
+{
+	dbtype_t ofs;
+	// Total cheat here.  All addresses are 8-byte aligned,
+	// so we can take advandate of the dbtype structure layout
+	// and represent addresses naturally with no shifting or masking
+	ofs.all = _offset(ctx, ptr);
+	return ofs;
+}
+
 /*
  * Given an offset in a mmaped file, return a pointer to the data
  */
@@ -42,27 +53,34 @@ static inline void *_ptr(pgctx_t *ctx, uint64_t offset)
 	return __ptr(&ctx->mm, offset);
 }
 
-static inline void rculoser(pgctx_t *ctx, void *addr)
+static inline void *dbptr(pgctx_t *ctx, dbtype_t offset)
 {
-    unsigned i;
-    //pmem_gc_suggest(addr, 0xc1);
-    //pmem_sb_free(NULL, addr);
-    for(i=0; i<ctx->loser.len; i++) {
-        pmem_sb_free(NULL, ctx->loser.addr[i]);
-    }
+	assert(isPtr(offset.type));
+	return _ptr(ctx, offset.all);
+}
+
+static inline void rcureset(pgctx_t *ctx)
+{
     ctx->loser.len = 0;
     ctx->winner.len = 0;
 }
 
-static inline void rcuwinner(pgctx_t *ctx, void *addr)
+static inline void rculoser(pgctx_t *ctx)
 {
     unsigned i;
-    pmem_gc_suggest(addr, 0xc3);
-    for(i=0; i<ctx->winner.len; i++) {
-        pmem_gc_suggest(ctx->winner.addr[i], 0xc4);
+    for(i=0; i<ctx->loser.len; i++) {
+        pmem_sb_free(NULL, dbptr(ctx, ctx->loser.addr[i]));
     }
-    ctx->loser.len = 0;
-    ctx->winner.len = 0;
+    rcureset(ctx);
+}
+
+static inline void rcuwinner(pgctx_t *ctx)
+{
+    unsigned i;
+    for(i=0; i<ctx->winner.len; i++) {
+        pmem_gc_suggest(dbptr(ctx, ctx->winner.addr[i]), 0xc4);
+    }
+    rcureset(ctx);
 }
 
 

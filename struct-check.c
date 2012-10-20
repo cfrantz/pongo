@@ -2,11 +2,11 @@
 #include <stdlib.h>
 #include <pongo/dbtypes.h>
 
-#define offsetof(s, e) ((long)(&((s*)0)->e))
+//#define offsetof(s, e) ((long)(&((s*)0)->e))
 
 #define check(t, n) do {					\
 	int x = offsetof(t, n);					\
-	int y = offsetof(dbtype_t, n);				\
+	int y = offsetof(dbval_t, n);				\
 	printf("%16s: %6s %2d %2d", #t, #n, x, y);		\
 	if (x != y) { printf(" error"); error = 1; }		\
 	printf("\n"); \
@@ -20,6 +20,7 @@ int
 main()
 {
 	int error = 0;
+	/*
 	size(dbboolean_t);
 	check(dbboolean_t, type);
 	check(dbboolean_t, _pad);
@@ -39,6 +40,7 @@ main()
 	check(dbfloat_t, type);
 	check(dbfloat_t, _pad);
 	check(dbfloat_t, fval);
+	*/
 
 	size(dbstring_t);
 	check(dbstring_t, type);

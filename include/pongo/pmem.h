@@ -111,6 +111,8 @@ extern void pmem_gc_mark(mmfile_t *mm, memheap_t *heap, int suggest);
 typedef void (*gcfreecb_t)(void *user, void *addr);
 extern void pmem_gc_free(mmfile_t *mm, memheap_t *heap, int fast, gcfreecb_t cb, void *user);
 
+extern void pmem_print_mem(mmfile_t *mm, memheap_t *heap);
+
 static inline void pmem_gc_suggest(void *addr, int x)
 {
     memblock_t *mb;

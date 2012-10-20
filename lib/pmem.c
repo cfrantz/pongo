@@ -26,7 +26,8 @@ mempool_t *pmem_pool_init(void *addr, uint32_t size)
 {
     mempool_t *pool = (mempool_t*)addr;
 
-    memset(pool, 0, size);
+    // CJF -- shouldn't need to do this
+    //memset(pool, 0, size);
     pool->signature = SIG_MEMPOOL;
     pool->next = 0;
     pool->size = size;
@@ -78,6 +79,7 @@ void *pmem_pool_alloc(mempool_t *pool, uint32_t size)
 
     if (ret) {
         assert((newdesc.e_ofs & 7) == 0);
+        //CJF -- should need this
         memset(ret, 0, size);
         pb = (poolblock_t*)ret;
         // The first word is the linked list pointer, the second is
@@ -157,20 +159,6 @@ int pmem_pool_free(void *addr)
     return 0;
 }
 
-void pmem_pool_print(mempool_t *pool)
-{
-    unsigned i, n, s, e, total;
-    log_bare("mempool addr=%p, size=0x%x next=0x%" PRIx64, pool, pool->size, pool->next);
-    n = (pool->desc[0].s_ofs - offsetof(mempool_t, desc)) / sizeof(pdescr_t);
-    log_bare("Free regions: %d", n);
-    for(total=i=0; i<n; i++) {
-        s = pool->desc[i].s_ofs;
-        e = pool->desc[i].e_ofs;
-        total += (e-s);
-        log_bare("    start=0x%08x end=0x%08x size=0x%08x", s, e, e-s);
-    }
-    log_bare("Total free: 0x%08x", total);
-}
 
 
 superblock_t *pmem_sb_init(mempool_t *pool, uint32_t blksz, uint32_t count)
@@ -232,6 +220,7 @@ void *pmem_sb_alloc(superblock_t *sb)
     assert(mb->alloc == 0);
     mb->alloc = 1;
     ret = (void*)(mb+1);
+    // CJF -- shouldn't need this
     memset(ret, 0, sb->size);
     return ret;
 }
@@ -251,7 +240,8 @@ void pmem_sb_free(superblock_t *sb, void *addr)
         sb = (superblock_t*)((uint8_t*)mb - mb->sbofs);
     }
     assert(mb->alloc);
-    memset(addr, mb->_resv, sb->size);
+    // CJF debug
+    memset(addr, 0, sb->size);
     mb->alloc = 0;
     mb->gc = 0;
     mb->suggest = 0;
@@ -378,16 +368,18 @@ void *pmem_sb_helper(mmfile_t *mm, memheap_t *heap, volatile mlist_t *memory, in
 
 static inline int pmem_heap(memheap_t *heap)
 {
-    int ph;
+    static int ph;
     int pid = getpid();
-    ph = 1 + pid % (heap->nr_procheap-1);
-//    log_debug("pid %d heap is %d", pid, ph);
+    if (!ph) {
+        ph = 1 + pid % (heap->nr_procheap-1);
+        log_bare("pid %d using heap %d", pid, ph);
+    }
     return ph;
 }
 
 void *pmem_alloc(mmfile_t *mm, memheap_t *heap, uint32_t sz)
 {
-    int ph, cls;
+    int ph, cls=0;
     volatile mlist_t *memory;
     poolblock_t *pb;
     void *ret = NULL;
@@ -435,6 +427,7 @@ void pmem_retire(mmfile_t *mm, memheap_t *heap)
 
     ph = pmem_heap(heap);
 
+    log_debug("Retiring heap %d", ph);
     for(i=0; i<NR_SZCLS; i++) {
         retire = &heap->procheap[0].szcls[i];
         memory = &heap->procheap[ph].szcls[i];
@@ -552,7 +545,7 @@ int pmem_gc_free_sb(superblock_t *sb, gcfreecb_t callback, void *user)
     for(n=i=0; i<sb->total; i++, p+=sb->size+sizeof(*mb)) {
         mb = (memblock_t*)p;
         if (mb->gc) {
-            callback(user, mb+1);
+            if (callback) callback(user, mb+1);
             pmem_sb_free(sb, mb+1);
             n++;
         }
@@ -566,7 +559,7 @@ void pmem_gc_free_sblist(mmfile_t *mm, volatile mlist_t *memory, gcfreecb_t call
     superblock_t *sb;
     int n;
 
-#if 0
+#if 1
     // First get the freelist to ourselves to no one can mess with it
     do {
         oldval = memory->freelist;
@@ -582,7 +575,7 @@ void pmem_gc_free_sblist(mmfile_t *mm, volatile mlist_t *memory, gcfreecb_t call
     while(sb) {
         pmem_gc_free_sb(sb, callback, user);
         oldval = sb->next;
-#if 0
+#if 1
         do {
             sb->next = memory->freelist;
         } while(!cmpxchg64(&memory->freelist, sb->next, newval));
@@ -646,7 +639,7 @@ void pmem_gc_free(mmfile_t *mm, memheap_t *heap, int fast, gcfreecb_t cb, void *
             cb(user, pb+1);
             pmem_pool_free(pb);
             // FIXME: a mempool with free space should be moved to the
-            // front of the mempool list
+            // front of the mempool freelist
         } else {
             do {
                 pb->next = heap->pool_alloc;
@@ -654,6 +647,89 @@ void pmem_gc_free(mmfile_t *mm, memheap_t *heap, int fast, gcfreecb_t cb, void *
         }
         newval = oldval;
         pb = __ptr(mm, newval);
+    }
+}
+
+static void print_mempool(mmfile_t *mm, mempool_t *pool)
+{
+    unsigned i, n, s, e, total;
+    uint64_t start = __offset(mm, pool);
+    log_bare("mempool addr=%08"PRIx64", size=0x%x next=0x%" PRIx64, start,
+            pool->size, pool->next);
+    n = (pool->desc[0].s_ofs - offsetof(mempool_t, desc)) / sizeof(pdescr_t);
+    log_bare("Free regions: %d", n);
+    for(total=i=0; i<n; i++) {
+        s = pool->desc[i].s_ofs;
+        e = pool->desc[i].e_ofs;
+        total += (e-s);
+        log_bare("    start=%08"PRIx64" end=%08"PRIx64" size=0x%08x", start+s, start+e, e-s);
+    }
+    log_bare("    Total free: 0x%08x", total);
+}
+
+
+void pmem_print_mem(mmfile_t *mm, memheap_t *heap)
+{
+    mempool_t *pool;
+    poolblock_t *pb;
+    superblock_t *sb;
+    volatile mlist_t *memory;
+    uint64_t p;
+    uint32_t total, free;
+    int i, j;
+
+    for(i=0; i<heap->nr_procheap; i++) {
+        for(j=0; j<NR_SZCLS; j++) {
+            memory = &heap->procheap[i].szcls[j];
+
+            log_bare("=== Freelist for heap %d szcls %d ===", i, j);
+            total = free = 0;
+            p = memory->freelist;
+            while(p) {
+                sb = __ptr(mm, p);
+                log_bare("superblock at %08" PRIx64 ": size=0x%x, %d/%d free", __offset(mm, sb), sb->size, sb->desc.count, sb->total);
+                total += sb->total;
+                free += sb->desc.count;
+                p = sb->next;
+            }
+            log_bare("Total: %d/%d blocks free (%d/%d bytes)", free, total, free*sb->size, total*sb->size);
+
+            log_bare("=== Fulllist for heap %d szcls %d ===", i, j);
+            total = free = 0;
+            p = memory->fulllist;
+            while(p) {
+                sb = __ptr(mm, p);
+                log_bare("superblock at %08" PRIx64 ": size=0x%x, %d/%d free", __offset(mm, sb), sb->size, sb->desc.count, sb->total);
+                total += sb->total;
+                free += sb->desc.count;
+                p = sb->next;
+            }
+            log_bare("Total: %d/%d blocks free (%d/%d bytes)", free, total, free*sb->size, total*sb->size);
+        }
+    }
+
+    log_bare("=== Pool Alloc List ===");
+    p = heap->pool_alloc;
+    while(p) {
+        pb = __ptr(mm, p);
+        printf("poolblock at %08" PRIx64 " is 0x%x bytes\n", __offset(mm, pb), pb->size);
+        p = pb->next;
+    }
+
+    log_bare("=== Pool Free List ===");
+    p = heap->pool.freelist;
+    while(p) {
+        pool = __ptr(mm, p);
+        print_mempool(mm, pool);
+        p = pool->next;
+    }
+
+    log_bare("=== Pool Full List ===");
+    p = heap->pool.fulllist;
+    while(p) {
+        pool = __ptr(mm, p);
+        print_mempool(mm, pool);
+        p = pool->next;
     }
 }
 

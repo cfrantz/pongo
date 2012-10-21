@@ -8,7 +8,7 @@
 #define PMEM_LOCKFREE 1
 #define PAGE_SIZE (4096)
 #define SMALLEST_ALLOC (16)
-#define NR_SZCLS 6
+#define NR_SZCLS 16
 
 typedef struct _pdescriptor {
 	union {
@@ -81,7 +81,7 @@ typedef struct _procheap {
 	int64_t last_used;
 	uint64_t id;
 	mlist_t szcls[NR_SZCLS];
-	uint8_t _pad[128 - (6*sizeof(mlist_t)+2*sizeof(uint64_t))];
+	uint8_t _pad[64 - (NR_SZCLS*sizeof(mlist_t)+2*sizeof(uint64_t)) % 64];
 } procheap_t;
 
 typedef struct _memheap {

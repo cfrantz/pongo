@@ -93,7 +93,7 @@ typedef struct {
 
 typedef struct {
 	dbtag_t type;
-	uint32_t _uupad[3];
+	uint32_t _pad;
 	uint8_t uuval[16];
 } dbuuid_t;
 
@@ -164,6 +164,7 @@ struct _dbval {
 			uint32_t _pad;
 			union {
                 // put primitive types like fval or ival here
+			    uint8_t uuval[16];
 				struct {
 					uint64_t size;
 					dbtype_t left, right;
@@ -175,10 +176,6 @@ struct _dbval {
 			uint32_t len;
 			uint32_t hash;
 			uint8_t sval[];
-		};
-		struct {
-			uint32_t _uupad[3];
-			uint8_t uuval[16];
 		};
 		struct {
 			volatile uint32_t refcnt; // used only by pidcache.  _pad for everyone else

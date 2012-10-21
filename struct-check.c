@@ -50,7 +50,7 @@ main()
 
 	size(dbuuid_t);
 	check(dbuuid_t, type);
-	check(dbuuid_t, _uupad);
+	check(dbuuid_t, _pad);
 	check(dbuuid_t, uuval);
 
 	size(dblist_t);

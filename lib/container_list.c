@@ -11,17 +11,9 @@
 dbtype_t dblist_new(pgctx_t *ctx)
 {
 	dbtype_t list;
-    _list_t *_list;
 	list.ptr = dballoc(ctx, sizeof(dblist_t));
     if (!list.ptr) return DBNULL;
 	list.ptr->type = List;
-    // Its easier to implement all of the list operations if the object
-    // starts with an empty list
-    _list = dballoc(ctx, sizeof(_list));
-    if (!_list) return DBNULL;
-    _list->type = _InternalList;
-    _list->len = 0;
-    list.ptr->list = dboffset(ctx, _list);
 	return dboffset(ctx, list.ptr);
 }
 
@@ -31,7 +23,7 @@ int dblist_len(pgctx_t *ctx, dbtype_t list)
     list.ptr = dbptr(ctx, list);
 	assert(list.ptr->type == List);
 	_list = dbptr(ctx, list.ptr->list);
-    return _list->len;
+    return _list ? _list->len : 0;
 }
 
 
@@ -50,11 +42,13 @@ int dblist_getitem(pgctx_t *ctx, dbtype_t list, int n, dbtype_t *item)
     list.ptr = dbptr(ctx, list);
 	assert(list.ptr->type == List);
 	_list = dbptr(ctx, list.ptr->list);
-    // As in Python, negative list index means "from end of list"
-    if (n<0) n += _list->len;
-    if (n >= 0 && n < _list->len) {
-        *item = _list->item[n];
-        return 0;
+    if (_list) {
+        // As in Python, negative list index means "from end of list"
+        if (n<0) n += _list->len;
+        if (n >= 0 && n < _list->len) {
+            *item = _list->item[n];
+            return 0;
+        }
     }
 	return -1;
 }
@@ -62,16 +56,17 @@ int dblist_getitem(pgctx_t *ctx, dbtype_t list, int n, dbtype_t *item)
 int dblist_setitem(pgctx_t *ctx, dbtype_t list, int n, dbtype_t item, int sync)
 {
 	_list_t *_list, *_newlist = NULL;
-	int sz;
+	int sz, llen;
 
     list.ptr = dbptr(ctx, list);
 	assert(list.ptr->type == List);
     do {
         // Read-Copy-Update loop for modify operations
     	_list = dbptr(ctx, list.ptr->list);
+        llen = _list ? _list->len : 0;
         // As in Python, negative list index means "from end of list"
-        if (n<0) n += _list->len;
-        if (n < 0 || n >= _list->len)
+        if (n<0) n += llen;
+        if (n < 0 || n >= llen)
 		return -1;
 
         sz = dblist_size(_list, 0);
@@ -94,10 +89,12 @@ int dblist_delitem(pgctx_t *ctx, dbtype_t list, int n, dbtype_t *item, int sync)
     do {
         // Read-Copy-Update loop for modify operations
         _list = dbptr(ctx, list.ptr->list);
+        if (!_list)
+            return -1;
         // As in Python, negative list index means "from end of list"
         if (n<0) n += _list->len;
         if (n < 0 || n >= _list->len)
-		return -1;
+            return -1;
         sz = dblist_size(_list, 0);
         dbfree(_newlist, 0xf3);
         _newlist = dballoc(ctx, sz);
@@ -118,25 +115,26 @@ int dblist_delitem(pgctx_t *ctx, dbtype_t list, int n, dbtype_t *item, int sync)
 int dblist_insert(pgctx_t *ctx, dbtype_t list, int n, dbtype_t item, int sync)
 {
 	_list_t *_list, *_newlist = NULL;
-	int sz, i, j;
+	int sz, i, j, llen;
 
     list.ptr = dbptr(ctx, list);
 	assert(list.ptr->type == List);
     // Read-Copy-Update loop for modify operations
     do {
         _list = dbptr(ctx, list.ptr->list);
+        llen = _list ? _list->len : 0;
 
         // INT_MAX is a magic value that means append
-        if (n == INT_MAX) n = _list->len;
+        if (n == INT_MAX) n = llen;
         // As in Python, negative list index means "from end of list"
-        if (n<0) n += _list->len;
-        if (n < 0 || n > _list->len)
+        if (n<0) n += llen;
+        if (n < 0 || n > llen)
             return -1;
         sz = dblist_size(_list, 1);
         dbfree(_newlist, 0xf5);
         _newlist = dballoc(ctx, sz);
         _newlist->type = _InternalList;
-        _newlist->len = _list->len + 1;
+        _newlist->len = llen + 1;
         for(i=j=0; i<_newlist->len; i++) {
             if (i == n) {
                 _newlist->item[i] = item; 
@@ -157,7 +155,7 @@ int dblist_append(pgctx_t *ctx, dbtype_t list, dbtype_t item, int sync)
 int dblist_extend(pgctx_t *ctx, dbtype_t list, int n, extendcb_t elem, void *user, int sync)
 {
 	_list_t *_list, *_newlist = NULL;
-	int sz, i, j;
+	int sz, i, j, llen;
     dbtype_t item;
 
     list.ptr = dbptr(ctx, list);
@@ -165,12 +163,13 @@ int dblist_extend(pgctx_t *ctx, dbtype_t list, int n, extendcb_t elem, void *use
     // Read-Copy-Update loop for modify operations
     do {
 	    _list = dbptr(ctx, list.ptr->list);
+        llen = _list ? _list->len : 0;
         sz = dblist_size(_list, n);
         dbfree(_newlist, 0xf7);
         _newlist = dballoc(ctx, sz);
         _newlist->type = _InternalList;
-        _newlist->len = _list->len + n;
-        for(i=0; i<_list->len; i++) {
+        _newlist->len = llen + n;
+        for(i=0; i<llen; i++) {
             _newlist->item[i] = _list->item[i];
         }
         for(j=0; j<n; j++, i++) {
@@ -194,6 +193,8 @@ int dblist_remove(pgctx_t *ctx, dbtype_t list, dbtype_t item, int sync)
     // Read-Copy-Update loop for modify operations
     do {
 	    _list = dbptr(ctx, list.ptr->list);
+        if (!_list)
+            return -1;
         sz = dblist_size(_list, 0);
         dbfree(_newlist, 0xf9);
         _newlist = dballoc(ctx, sz);
@@ -228,9 +229,11 @@ int dblist_contains(pgctx_t *ctx, dbtype_t list, dbtype_t item)
     list.ptr = dbptr(ctx, list);
 	assert(list.ptr->type == List);
     _list = dbptr(ctx, list.ptr->list);
-    for(i=0; i<_list->len; i++) {
-        if (dbcmp(ctx, _list->item[i], item) == 0)
-            return 1;
+    if (_list) {
+        for(i=0; i<_list->len; i++) {
+            if (dbcmp(ctx, _list->item[i], item) == 0)
+                return 1;
+        }
     }
     return 0;
 }

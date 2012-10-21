@@ -115,5 +115,5 @@ Footnotes
     http://people.csail.mit.edu/nickolai/papers/clements-bonsai.pdf
 
 [2] Scalable Lock-Free Dynamic Memory Allocation
-    http://redlinernotes.com/docs/Classics/Later_on/Scalable%20Lock-Free%20Dynamic%20Memory%20Allocation.pdf
+    http://www.research.ibm.com/people/m/michael/pldi-2004.pdf
 

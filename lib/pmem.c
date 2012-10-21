@@ -22,6 +22,11 @@
 void *(*pmem_more_memory)(mmfile_t *mm, uint32_t *size);
 uint8_t free_pattern;
 
+static unsigned clssize[NR_SZCLS] = {
+    16, 24, 32, 40, 48, 64, 80, 96,
+    128, 160, 192, 256, 384, 512, 768
+};
+
 mempool_t *pmem_pool_init(void *addr, uint32_t size)
 {
     mempool_t *pool = (mempool_t*)addr;
@@ -344,7 +349,7 @@ void *pmem_sb_helper(mmfile_t *mm, memheap_t *heap, volatile mlist_t *memory, in
 
             // If there was no block available, allocate one from the pool
             if (!sb) {
-                sz = 16 << cls;
+                sz = clssize[cls];
                 sb = pmem_sb_init(__ptr(mm, heap->pool.freelist), sz, NR_CHUNKS(sz));
             }
 
@@ -379,34 +384,23 @@ static inline int pmem_heap(memheap_t *heap)
 
 void *pmem_alloc(mmfile_t *mm, memheap_t *heap, uint32_t sz)
 {
-    int ph, cls=0;
+    int ph, cls;
     volatile mlist_t *memory;
     poolblock_t *pb;
     void *ret = NULL;
 
     ph = pmem_heap(heap);
-    if (sz <= 16) {
-        cls = 0;
-        sz = 16;
-    } else if (sz <= 32) {
-        cls = 1;
-    } else if (sz <= 64) {
-        cls = 2;
-    } else if (sz <= 128) {
-        cls = 3;
-    } else if (sz <= 256) {
-        cls = 4;
-    } else if (sz <= 512) {
-        cls = 5;
-    } else {
-        // Round to nearest kilobyte
-        sz = (sz + 0x3FF) & ~0x3FF; 
+    for(cls=0; cls<NR_SZCLS; cls++) {
+        if (sz <= clssize[cls])
+            break;
     }
 
-    if (sz <= 512) {
+    if (cls < NR_SZCLS) {
         memory = &heap->procheap[ph].szcls[cls];
         ret = pmem_sb_helper(mm, heap, memory, cls);
     } else {
+        // Round to nearest kilobyte
+        sz = (sz + 0x3FF) & ~0x3FF; 
         ret = pmem_pool_helper(mm, heap, sz);
 
         // Put the block on the allocated list

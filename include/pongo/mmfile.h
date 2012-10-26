@@ -160,9 +160,9 @@ static inline void __tlbset(mmfile_t *mm, uint64_t offset, void *ptr)
 static inline uint64_t __offset(mmfile_t *mm, void *ptr)
 {
 	mmap_t *m;
-	uint64_t offset;
+	uint64_t offset=0;
 
-	offset = __tlboffset(mm, ptr);
+	//offset = __tlboffset(mm, ptr);
 	if (!offset) {
 	       	m = __mm_ptr(mm, ptr);
 		offset = m->offset + ((uint8_t*)ptr - (uint8_t*)m->ptr);
@@ -175,10 +175,10 @@ static inline uint64_t __offset(mmfile_t *mm, void *ptr)
 static inline void *__ptr(mmfile_t *mm, uint64_t offset)
 {
 	mmap_t *m;
-	void *ptr;
+	void *ptr = NULL;
 
 	if (!offset) return NULL;
-	ptr = __tlbptr(mm, offset);
+	//ptr = __tlbptr(mm, offset);
 	if (!ptr) {
 		m = __mm_offset(mm, offset);
 		ptr = m->ptr + (offset - m->offset);

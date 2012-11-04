@@ -178,12 +178,12 @@ int _dbmemlock(pgctx_t *ctx, memblock_t *mb, uint32_t op)
 void dblock(pgctx_t *ctx)
 {
 	_dblockop(ctx, MLCK_RD, ctx->root->lock);
-	__dblocked=1;
+	__dblocked++;
 }
 
 void dbunlock(pgctx_t *ctx)
 {
-	__dblocked=0;
+	__dblocked--;
 	_dblockop(ctx, MLCK_UN, ctx->root->lock);
 }
 
@@ -228,16 +228,20 @@ static void gc_walk(pgctx_t *ctx, dbtype_t root)
 	switch(root.ptr->type) {
 		case List:
 			list = dbptr(ctx, root.ptr->list);
-			gc_keep(ctx, list);
-			for(i=0; i<list->len; i++) 
-				gc_walk(ctx, list->item[i]);
+			if (list) {
+				gc_keep(ctx, list);
+				for(i=0; i<list->len; i++) 
+					gc_walk(ctx, list->item[i]);
+			}
 			break;
 		case Object:
 			obj = dbptr(ctx, root.ptr->obj);
-			gc_keep(ctx, obj);
-			for(i=0; i<obj->len; i++) {
-				gc_walk(ctx, obj->item[i].key);
-				gc_walk(ctx, obj->item[i].value);
+			if (obj) {
+				gc_keep(ctx, obj);
+				for(i=0; i<obj->len; i++) {
+					gc_walk(ctx, obj->item[i].key);
+					gc_walk(ctx, obj->item[i].value);
+				}
 			}
 			break;
 		case Collection:

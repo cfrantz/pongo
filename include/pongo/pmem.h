@@ -40,13 +40,13 @@ typedef struct _poolblock {
 
 typedef struct _memblock {
 	uint32_t sbofs;
-	uint16_t next;
-	uint16_t
+	uint32_t
 		type:	1,
 		alloc:	1,
 		gc:	1,
 		suggest:1,
-		_resv:  12;
+		_resv:  12,
+		next: 16;
 } memblock_t;
 
 typedef union _bdescr { 

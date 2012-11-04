@@ -630,8 +630,8 @@ void pmem_gc_free(mmfile_t *mm, memheap_t *heap, int fast, gcfreecb_t cb, void *
     while(pb) {
         oldval = pb->next;
         if (pb->gc) {
-            cb(user, pb+1);
-            pmem_pool_free(pb);
+            if (cb) cb(user, pb+1);
+            pmem_pool_free(pb+1);
             // FIXME: a mempool with free space should be moved to the
             // front of the mempool freelist
         } else {

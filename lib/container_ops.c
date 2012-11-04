@@ -145,6 +145,7 @@ static void search_helper(pgctx_t *ctx, dbtype_t node, void *user)
 // db_search(ctx, coll, "foo.bar.*", db_EQ, 23, result);
 //
 // FIXME:  This function could probably be cleaned up quite a bit.
+// FIXME:  This function does an exhaustive search.
 int db_search(pgctx_t *ctx, dbtype_t obj, dbtype_t path, int n, relop_t relop, dbtype_t value, dbtype_t result)
 {
     int cmp, i, r;

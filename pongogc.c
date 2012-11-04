@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <pongo/dbmem.h>
+#include <pongo/json.h>
 #include <pongo/misc.h>
 #include <pongo/log.h>
 
@@ -33,7 +34,7 @@ main(int argc, char *argv[])
     char *dbfile = NULL;
     int64_t t0, t1;
     pgctx_t *ctx;
-    int info = 0;
+    int info = 0, dump = 0;
 
     for(i=1; i<argc; i++) {
         if (!strcmp(argv[i], "-l")) {
@@ -44,6 +45,8 @@ main(int argc, char *argv[])
             dbfile = argv[++i];
         } else if (!strcmp(argv[i], "-i")) {
             info = 1;
+        } else if (!strcmp(argv[i], "-d")) {
+            dump = 1;
         } else {
             return usage(argv[0]);
         }
@@ -52,15 +55,19 @@ main(int argc, char *argv[])
         return usage(argv[0]);
 
     printf("PongoGC: file=%s\n", dbfile);
-    printf("  short_interval=%uus\n", short_interval);
-    printf("   long_interval=%uus\n", long_interval);
     log_init(NULL, LOG_DEBUG);
     ctx = dbfile_open(dbfile, 0);
     if (info) {
         print_meminfo(ctx);
         return 0;
     }
+    if (dump) {
+        json_dump(ctx, ctx->root->data, stdout);
+        return 0;
+    }
 
+    printf("  short_interval=%uus\n", short_interval);
+    printf("   long_interval=%uus\n", long_interval);
     db_gc(ctx, 1, NULL);
     t0 = utime_now();
     for(;;) {

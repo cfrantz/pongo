@@ -14,7 +14,7 @@ LD=gcc
 	$(CC) $(CFLAGS) $(INCLUDE) -c $< -o $@
 
 pongogc: $(OBJS) lib/libpongo.a
-	$(LD) -o $@ $< lib/libpongo.a $(LIBS)
+	$(LD) -o $@ $< lib/libpongo.a yajl/libyajl.a $(LIBS)
 
 struct-check: struct-check.c
 	$(CC) $(CFLAGS) $(INCLUDE) -o struct-check $<

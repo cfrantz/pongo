@@ -7,6 +7,7 @@ static PyTypeObject *uuid_class;
 static PyObject *uuid_constructor;
 #endif
 PyObject *pongo_id;
+PyObject *pongo_utcnow;
 PyObject *pongo_newkey = Py_None;
 
 static dbtype_t
@@ -223,6 +224,10 @@ from_python(pgctx_t *ctx, PyObject *ob)
     }
     if (ob == Py_None) {
         db = DBNULL;
+    } else if (ob == pongo_id) {
+        db = dbuuid_new(ctx, NULL);
+    } else if (ob == pongo_utcnow) {
+        db = dbtime_now(ctx);
     } else if (PyBool_Check(ob)) {
         db = dbboolean_new(ctx, ob == Py_True);
     } else if (PyInt_Check(ob)) {
@@ -567,6 +572,9 @@ PyMODINIT_FUNC init_pongo(void)
 
     pongo_id = PyObject_CallFunction((PyObject*)&PyBaseObject_Type, NULL);
     PyModule_AddObject(m, "id", pongo_id);
+
+    pongo_utcnow = PyObject_CallFunction((PyObject*)&PyBaseObject_Type, NULL);
+    PyModule_AddObject(m, "utcnow", pongo_utcnow);
 
 #ifdef WANT_UUID_TYPE
     uumod = PyImport_ImportModule("uuid");

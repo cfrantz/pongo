@@ -177,16 +177,20 @@ static void json_print(void *ctx, const char *str, size_t len)
 {
 	jsonctx_t *c = (jsonctx_t*)ctx;
     unsigned chunk;
-    if (c->outstr == NULL)
-        c->outlen = 0;
-    chunk = (c->outlen+65535) & ~65535;
-    if (c->outlen + len > chunk) {
-        chunk = (c->outlen + len + 65535) & ~65535;
-        c->outstr = realloc(c->outstr, chunk);
+    if (c->outfp) {
+        fwrite(str, 1, len, c->outfp);
+    } else {
+        if (c->outstr == NULL)
+            c->outlen = 0;
+        chunk = (c->outlen+65535) & ~65535;
+        if (c->outlen + len > chunk) {
+            chunk = (c->outlen + len + 65535) & ~65535;
+            c->outstr = realloc(c->outstr, chunk);
+        }
+        memcpy(c->outstr+c->outlen, str, len);
+        c->outlen += len;
+        c->outstr[c->outlen] = 0;
     }
-    memcpy(c->outstr+c->outlen, str, len);
-    c->outlen += len;
-    c->outstr[c->outlen] = 0;
 }
 
 static void collection_helper(pgctx_t *ctx, dbtype_t node, void *user)
@@ -350,6 +354,14 @@ dbtype_t json_parse(jsonctx_t *ctx, char *buf, int len)
         len = strlen(buf);
     yajl_parse(ctx->json.parser, UC(buf), len);
     return (ctx->depth == 0) ? ctx->stack[0] : DBNULL;
+}
+
+void json_dump(pgctx_t *dbctx, dbtype_t obj, FILE *fp)
+{
+    jsonctx_t *ctx = json_init(dbctx);
+    ctx->outfp = fp;
+    json_emit(ctx, obj);
+    json_cleanup(ctx);
 }
 
 // vim: ts=4 sts=4 sw=4 expandtab:

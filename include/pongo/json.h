@@ -17,10 +17,12 @@ typedef struct {
 	} json;
     char *outstr;
     unsigned outlen;
+    FILE *outfp;
 } jsonctx_t;
 
 extern jsonctx_t *json_init(pgctx_t *dbctx);
 extern void json_cleanup(jsonctx_t *ctx);
 extern dbtype_t json_parse(jsonctx_t *ctx, char *buf, int len);
 extern char *json_emit(jsonctx_t *ctx, dbtype_t obj);
+extern void json_dump(pgctx_t *dbctx, dbtype_t obj, FILE *fp);
 #endif

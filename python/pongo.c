@@ -181,7 +181,9 @@ to_python(pgctx_t *ctx, dbtype_t db, int proxy)
 static int sequence_cb(pgctx_t *ctx, int i, dbtype_t *item, void *user)
 {
     PyObject *seq = (PyObject*)user;
-    *item = from_python(ctx, PySequence_GetItem(seq, i));
+    PyObject *sqitem = PySequence_GetItem(seq, i);
+    *item = from_python(ctx, sqitem);
+    Py_DECREF(sqitem);
     if (PyErr_Occurred()) return -1;
     return 0;
 }
@@ -190,8 +192,12 @@ static int mapping_cb(pgctx_t *ctx, int i, dbtype_t *key, dbtype_t *value, void 
 {
     PyObject *map = (PyObject*)user;
     PyObject *item = PySequence_GetItem(map, i);
-    *key = from_python(ctx, PySequence_GetItem(item, 0));
-    *value = from_python(ctx, PySequence_GetItem(item, 1));
+    PyObject *k = PySequence_GetItem(item, 0);
+    PyObject *v = PySequence_GetItem(item, 1);
+    *key = from_python(ctx, k);
+    *value = from_python(ctx, v);
+    Py_DECREF(k); Py_DECREF(v);
+    Py_DECREF(item);
     if (PyErr_Occurred()) return -1;
     return 0;
 }
@@ -200,8 +206,12 @@ static int itermapping_cb(pgctx_t *ctx, int i, dbtype_t *key, dbtype_t *value, v
 {
     PyObject *iter = (PyObject*)user;
     PyObject *item = PyIter_Next(iter);
-    *key = from_python(ctx, PySequence_GetItem(item, 0));
-    *value = from_python(ctx, PySequence_GetItem(item, 1));
+    PyObject *k = PySequence_GetItem(item, 0);
+    PyObject *v = PySequence_GetItem(item, 1);
+    *key = from_python(ctx, k);
+    *value = from_python(ctx, v);
+    Py_DECREF(k); Py_DECREF(v);
+    Py_DECREF(item);
     if (PyErr_Occurred()) return -1;
     return 0;
 }
@@ -268,8 +278,11 @@ from_python(pgctx_t *ctx, PyObject *ob)
             // mapping object implements "items"
             db = dbobject_new(ctx);
             dbobject_update(ctx, db, length, mapping_cb, items, NOSYNC);
+            Py_XDECREF(items);
         } else {
             // mapping object implements iterator protocol
+            // don't have to decref the iterator object cuz it self-decrefs
+            // upon StopIteration
             PyErr_Clear();
             items = PyObject_GetIter(ob);
             db = dbobject_new(ctx);

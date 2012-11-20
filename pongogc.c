@@ -10,10 +10,13 @@
 int
 usage(const char *progname)
 {
-    printf("%s [-i interval] [-f dbfile]\n"
+    printf("%s [-f dbfile] [-l seconds] [-s seconds] [-i] [-d]\n"
         "    PongoDB Garbage Collector:\n"
-        "        -i: Set the interval between GC runs\n"
-        "        -f: Database file on which to operate\n",
+        "        -f: Database file on which to operate\n"
+        "        -l: Long GC interval (full collection)\n"
+        "        -s: Short GC interval (quick collections)\n"
+        "        -i: Allocator/Heap info\n"
+        "        -d: dump database as json to stdout\n",
         progname);
     return 1;
 }

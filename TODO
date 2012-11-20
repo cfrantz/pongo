@@ -1,13 +1,9 @@
 TODO List:
 ==========
 
-Memory leak?
-
 Generic object recreation registry.
 	a) __jsonclass__
 	b) __classname__
-
-Lock free dballoc.
 
 PongoDB server, horizontal sharding, mapreduce.
 

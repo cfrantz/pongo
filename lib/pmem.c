@@ -21,6 +21,7 @@
 
 void *(*pmem_more_memory)(mmfile_t *mm, uint32_t *size);
 uint8_t free_pattern;
+uint64_t procheap_timeout = 60000000;
 
 static unsigned clssize[NR_SZCLS] = {
     16, 24, 32, 40, 48, 64, 80, 96,
@@ -385,18 +386,21 @@ static inline int pmem_heap(memheap_t *heap)
 void *pmem_alloc(mmfile_t *mm, memheap_t *heap, uint32_t sz)
 {
     int ph, cls;
+    procheap_t *procheap;
     volatile mlist_t *memory;
     poolblock_t *pb;
     void *ret = NULL;
 
-    ph = pmem_heap(heap);
     for(cls=0; cls<NR_SZCLS; cls++) {
         if (sz <= clssize[cls])
             break;
     }
 
     if (cls < NR_SZCLS) {
-        memory = &heap->procheap[ph].szcls[cls];
+        ph = pmem_heap(heap);
+        procheap = &heap->procheap[ph];
+        procheap->last_used = utime_now();
+        memory = &procheap->szcls[cls];
         ret = pmem_sb_helper(mm, heap, memory, cls);
     } else {
         // Round to nearest kilobyte
@@ -412,14 +416,15 @@ void *pmem_alloc(mmfile_t *mm, memheap_t *heap, uint32_t sz)
     return ret;
 }
 
-void pmem_retire(mmfile_t *mm, memheap_t *heap)
+void pmem_retire(mmfile_t *mm, memheap_t *heap, int ph)
 {
-    int ph, i;
+    int i;
     volatile mlist_t *memory, *retire;
     uint64_t oldval, newval;
     superblock_t *sb;
 
-    ph = pmem_heap(heap);
+    if (ph == 0)
+        ph = pmem_heap(heap);
 
     log_debug("Retiring heap %d", ph);
     for(i=0; i<NR_SZCLS; i++) {
@@ -609,6 +614,7 @@ void pmem_gc_free(mmfile_t *mm, memheap_t *heap, int fast, gcfreecb_t cb, void *
     poolblock_t *pb;
     unsigned i, j;
     uint64_t oldval, newval;
+    uint64_t now;
 
     free_pattern = fast ? 0xFE : 0xFA;
     for(i=0; i<heap->nr_procheap; i++) {
@@ -619,6 +625,13 @@ void pmem_gc_free(mmfile_t *mm, memheap_t *heap, int fast, gcfreecb_t cb, void *
 
     if (fast)
         return;
+
+    now = utime_now();
+    for(i=1; i<heap->nr_procheap; i++) {
+        if (heap->procheap[i].last_used - now >= procheap_timeout) {
+            pmem_retire(mm, heap, i);
+        }
+    }
     
     // First get the pool_alloc list to ourselves to no one can mess with it
     do {

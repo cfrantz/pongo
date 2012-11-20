@@ -105,7 +105,7 @@ extern void *pmem_sb_alloc(superblock_t *sb);
 extern void pmem_sb_free(superblock_t *sb, void *addr);
 
 extern void *pmem_alloc(mmfile_t *mm, memheap_t *heap, uint32_t sz);
-extern void pmem_retire(mmfile_t *mm, memheap_t *heap);
+extern void pmem_retire(mmfile_t *mm, memheap_t *heap, int ph);
 extern void pmem_gc_mark(mmfile_t *mm, memheap_t *heap, int suggest);
 
 typedef void (*gcfreecb_t)(void *user, void *addr);

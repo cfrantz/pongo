@@ -24,7 +24,8 @@ typedef struct _mempool {
 	uint64_t signature;
 	uint64_t next;
 	uint32_t size;
-	uint8_t __pad[64-(2*sizeof(uint64_t)+sizeof(uint32_t))];
+	uint32_t largest_free, total_free;
+	uint8_t __pad[64-(2*sizeof(uint64_t)+3*sizeof(uint32_t))];
 	volatile pdescr_t desc[1];
 } mempool_t;
 
@@ -84,10 +85,18 @@ typedef struct _procheap {
 	uint8_t _pad[64 - (NR_SZCLS*sizeof(mlist_t)+2*sizeof(uint64_t)) % 64];
 } procheap_t;
 
+typedef struct _plist {
+	int32_t sizes[17];
+	uint32_t _pad;
+	uint64_t nr_pools;
+	uint64_t pool[64];  // the sizeof calculation for allocating plist_t will give
+	                    // this many spare slots
+} plist_t;
+
 typedef struct _memheap {
 	uint64_t nr_procheap;
-	mlist_t pool;
-	uint8_t _pad0[64-2*sizeof(uint64_t)];
+	uint64_t mempool;
+	uint64_t pool;
 	uint64_t pool_alloc;
 	uint8_t _pad1[64-sizeof(uint64_t)];
 	procheap_t procheap[];
@@ -100,13 +109,14 @@ extern void *pmem_pool_alloc(mempool_t *pool, uint32_t size);
 extern int pmem_pool_free(void *addr);
 extern void pmem_pool_print(mempool_t *pool);
 
-extern superblock_t *pmem_sb_init(mempool_t *pool, uint32_t blksz, uint32_t count);
+extern superblock_t *pmem_sb_init(void *mem, uint32_t blksz, uint32_t count);
 extern void *pmem_sb_alloc(superblock_t *sb);
 extern void pmem_sb_free(superblock_t *sb, void *addr);
 
 extern void *pmem_alloc(mmfile_t *mm, memheap_t *heap, uint32_t sz);
 extern void pmem_retire(mmfile_t *mm, memheap_t *heap, int ph);
 extern void pmem_gc_mark(mmfile_t *mm, memheap_t *heap, int suggest);
+extern void pmem_relist_pools(mmfile_t *mm, memheap_t *heap);
 
 typedef void (*gcfreecb_t)(void *user, void *addr);
 extern void pmem_gc_free(mmfile_t *mm, memheap_t *heap, int fast, gcfreecb_t cb, void *user);

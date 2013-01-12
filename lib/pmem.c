@@ -101,6 +101,22 @@ void *pmem_pool_alloc(mempool_t *pool, uint32_t size)
     return ret;
 }
 
+void pmem_pool_stats(mempool_t *pool)
+{
+    unsigned i, n, sz, mf=0, tf=0;
+    pdescr_t desc;
+
+    n = (pool->desc[0].s_ofs - offsetof(mempool_t, desc)) / sizeof(pdescr_t);
+    for(i=0; i<n; i++) {
+        desc = pool->desc[i];
+        sz = desc.e_ofs - desc.s_ofs;
+        if (sz > mf) mf = sz;
+        tf += sz;
+    }
+    pool->largest_free = mf;
+    pool->total_free = tf;
+}
+
 int pmem_pool_free(void *addr)
 {
     mempool_t *pool;
@@ -167,7 +183,7 @@ int pmem_pool_free(void *addr)
 
 
 
-superblock_t *pmem_sb_init(mempool_t *pool, uint32_t blksz, uint32_t count)
+superblock_t *pmem_sb_init(void *mem, uint32_t blksz, uint32_t count)
 {
     superblock_t *sb;
     memblock_t *mb;
@@ -175,7 +191,8 @@ superblock_t *pmem_sb_init(mempool_t *pool, uint32_t blksz, uint32_t count)
     unsigned i;
 
     // Allocate a big block out of the mempool
-    sb = pmem_pool_alloc(pool, sizeof(*sb) + count*(blksz+sizeof(*mb)));
+    sb = (superblock_t*)mem;
+    //sb = pmem_pool_alloc(pool, sizeof(*sb) + count*(blksz+sizeof(*mb)));
     if (!sb)
         return NULL;
 
@@ -261,55 +278,81 @@ void pmem_sb_free(superblock_t *sb, void *addr)
     } while(!cmpxchg64(&sb->desc, oldval.all, newval.all));
 }
 
-void *pmem_more(mmfile_t *mm, volatile mlist_t *pool)
+void *pmem_more(mmfile_t *mm, memheap_t *heap)
 {
     void *more = NULL;
-    uint32_t newsize;
+    uint32_t newsize, i;
+    uint64_t offset;
     mempool_t *mp;
+    plist_t *pool = __ptr(mm, heap->pool);
+    int success;
 
     // Try to get more memory
     if (pmem_more_memory) 
         more = pmem_more_memory(mm, &newsize);
     if (more) {
+        // initialize th mempool
         mp = pmem_pool_init(more, newsize);
+        offset = __offset(mm, mp);
+
+        // Add it to the mempool list
         do {
-            mp->next = pool->freelist;
-        } while(!cmpxchg64(&pool->freelist, mp->next, __offset(mm, mp)));
+            mp->next = heap->mempool;
+        } while(!cmpxchg64(&heap->mempool, mp->next, offset));
+
+        // Also add it to the plist list so we can use it for
+        // allocation
+        do {
+            i = pool->nr_pools;
+            success = cmpxchg64(&pool->pool[i], 0, offset);
+            if (success)
+                cmpxchg64(&pool->nr_pools, i, i+1);
+        } while(!success);
+
     }
     return more;
 }
 
 void *pmem_pool_helper(mmfile_t *mm, memheap_t *heap, uint32_t size)
 {
-    volatile mlist_t *pool = &heap->pool;
-    uint64_t freelist;
+    plist_t *pool = __ptr(mm, heap->pool);
+    uint64_t freelist, _pool;
+    int bucket;
     mempool_t *mp;
     void *ret = NULL;
+
+    // Find the list to which the allocation would best fit
+    _pool = heap->pool;
+retry:
+    pool = __ptr(mm, heap->pool);
+    // round to the nearest kilobyte, then find the appropriate 4k bucket.
+    bucket = (size+1023) / 4096;
+    if (bucket > 16) bucket = 16;
+
+    // If no such bucket exists, go to the next sized bucket
+    while(pool->sizes[bucket] == -1)
+        bucket++;
+    bucket = pool->sizes[bucket];
 
     for(;;) {
         // Get the mempool pointer from the freelist and try an
         // allocation
-        freelist = pool->freelist;
+        freelist = pool->pool[bucket];
         mp = __ptr(mm, freelist);
         if (mp && (ret=pmem_pool_alloc(mp, size)) != NULL)
             break;
 
         // if the allocation failed
         if (mp) {
-            // Push the pool onto the fulllist
-            if (cmpxchg64(&pool->freelist, freelist, mp->next)) {
-                // freelist is now pointing at the "full" mp
-                do {
-                    mp->next = pool->fulllist;
-                } while(!cmpxchg64(&pool->fulllist, mp->next, freelist));
-            }
+            // Try the next bucket
+            bucket++;
         } else {
             // Try to get more memory
-#if 0
-            if (!pmem_more(mm, pool))
-                break;
-#endif
-            pmem_more(mm, &heap->pool);
+            pmem_more(mm, heap);
+            
+            // if the plist happened to get modified, start over
+            if (_pool != heap->pool)
+                goto retry;
         }
     }
     return ret;
@@ -351,7 +394,11 @@ void *pmem_sb_helper(mmfile_t *mm, memheap_t *heap, volatile mlist_t *memory, in
             // If there was no block available, allocate one from the pool
             if (!sb) {
                 sz = clssize[cls];
-                sb = pmem_sb_init(__ptr(mm, heap->pool.freelist), sz, NR_CHUNKS(sz));
+                // FIXME: 65536 is the size NR_CHUNKS tries to get close to
+                // this really should be driven off of some compile time or runtime
+                // parameter
+                sb = pmem_pool_helper(mm, heap, 65536);
+                sb = pmem_sb_init(sb, sz, NR_CHUNKS(sz));
             }
 
             if (sb) {
@@ -361,11 +408,7 @@ void *pmem_sb_helper(mmfile_t *mm, memheap_t *heap, volatile mlist_t *memory, in
                 } while(!cmpxchg64(&memory->freelist, sb->next, __offset(mm, sb)));
             } else {
                 // Try to get more memory
-#if 0
-                if (!pmem_more(mm, &heap->pool))
-                    break;
-#endif
-                pmem_more(mm, &heap->pool);
+                pmem_more(mm, heap);
             }
         }
     }
@@ -609,6 +652,92 @@ void pmem_gc_free_sblist(mmfile_t *mm, volatile mlist_t *memory, gcfreecb_t call
     }
 }
 
+static int _partition(uint64_t *array, int left, int right, int pivot)
+{
+#define swap(x, y) do { \
+        uint64_t tmp = array[x]; \
+        array[x] = array[y]; \
+        array[y] = tmp; \
+    } while(0)
+    int i, stindex = left;
+    mempool_t *pvt = (mempool_t*)array[pivot];
+    mempool_t *item;
+
+    swap(pivot, right);
+    for(i=left; i<right; i++) {
+        item = (mempool_t*)array[i];
+        if (item->largest_free < pvt->largest_free) {
+            swap(i, stindex);
+            stindex++;
+        }
+    }
+    swap(stindex, right);
+    return stindex;
+#undef swap
+}
+
+static void _quicksort(uint64_t *array, int left, int right)
+{
+    int pivot;
+    if (left < right) {
+        pivot = left + (right-left)/2;
+        pivot = _partition(array, left, right, pivot);
+        _quicksort(array, left, pivot-1);
+        _quicksort(array, pivot+1, right);
+    }
+}
+
+void pmem_relist_pools(mmfile_t *mm, memheap_t *heap)
+{
+    int i;
+    uint32_t bucket;
+    uint64_t val;
+    plist_t *pool;
+    mempool_t *mp;
+
+    // First figure out how much memory to alloc for the new plist structure
+    pool = __ptr(mm, heap->pool);
+    i = sizeof(plist_t);
+    if (pool) {
+        i += pool->nr_pools*sizeof(uint64_t);
+        pool = pmem_pool_helper(mm, heap, i);
+    } else {
+        pool = pmem_pool_alloc(__ptr(mm, heap->mempool), i);
+    }
+
+    // Initialize the sizes array to -1 (aka invalid pool index)
+    for(i=0; i<sizeof(pool->sizes)/sizeof(pool->sizes[0]); i++)
+        pool->sizes[i] = -1;
+
+    // Now walk the list of mempools and add them to the pool list
+    i=0;
+    val = heap->mempool;
+    do {
+        mp = __ptr(mm, val);
+        pool->pool[i++] = (uint64_t)mp;
+        pmem_pool_stats(mp);
+        val = mp->next;
+    } while(val);
+    pool->nr_pools = i;
+
+    // Sort the list by largest_free block
+    _quicksort(pool->pool, 0, i-1);
+
+    // Now walk through the list and assign the sizes indicies to make allocation easier.
+    // Then, translate the pointers back to offsets.
+    for(i=i-1; i>=0; i--) {
+        mp = (mempool_t*)pool->pool[i];
+        bucket = mp->largest_free;
+        if (bucket > 1024) {
+            bucket /= 4096;
+            if (bucket > 16) bucket = 16;
+            pool->sizes[bucket] = i;
+        }
+        pool->pool[i] = __offset(mm, mp);
+    }
+    heap->pool = __offset(mm, pool);
+}
+
 void pmem_gc_free(mmfile_t *mm, memheap_t *heap, int fast, gcfreecb_t cb, void *user)
 {
     poolblock_t *pb;
@@ -655,6 +784,7 @@ void pmem_gc_free(mmfile_t *mm, memheap_t *heap, int fast, gcfreecb_t cb, void *
         newval = oldval;
         pb = __ptr(mm, newval);
     }
+    pmem_relist_pools(mm, heap);
 }
 
 static void print_mempool(mmfile_t *mm, mempool_t *pool)
@@ -671,13 +801,13 @@ static void print_mempool(mmfile_t *mm, mempool_t *pool)
         total += (e-s);
         log_bare("    start=%08"PRIx64" end=%08"PRIx64" size=0x%08x", start+s, start+e, e-s);
     }
-    log_bare("    Total free: 0x%08x", total);
+    log_bare("    Largest free: 0x%08x, Total free: 0x%08x", pool->largest_free, total);
 }
 
 
 void pmem_print_mem(mmfile_t *mm, memheap_t *heap)
 {
-    mempool_t *pool;
+    plist_t *plist;
     poolblock_t *pb;
     superblock_t *sb;
     volatile mlist_t *memory;
@@ -724,19 +854,15 @@ void pmem_print_mem(mmfile_t *mm, memheap_t *heap)
     }
 
     log_bare("=== Pool Free List ===");
-    p = heap->pool.freelist;
-    while(p) {
-        pool = __ptr(mm, p);
-        print_mempool(mm, pool);
-        p = pool->next;
+    plist = __ptr(mm, heap->pool);
+    for(i=0; i<17; i++) {
+        log_bare("Pool index for allocation size %dK: %d", i*4, plist->sizes[i]);
     }
 
-    log_bare("=== Pool Full List ===");
-    p = heap->pool.fulllist;
-    while(p) {
-        pool = __ptr(mm, p);
-        print_mempool(mm, pool);
-        p = pool->next;
+    log_bare("=== All Known mempools ===");
+    for(i=0; i<plist->nr_pools; i++) {
+    log_bare("*** Index: %d", i);
+        print_mempool(mm, __ptr(mm, plist->pool[i]));
     }
 }
 

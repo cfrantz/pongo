@@ -1,6 +1,14 @@
 TODO List:
 ==========
 
+Indexes: build alternate bonsai trees for fast object lookups on
+alternate fields.
+
+
+json:select for querying.
+
+
+
 Generic object recreation registry.
 	a) __jsonclass__
 	b) __classname__

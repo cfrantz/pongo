@@ -35,6 +35,7 @@ pgctx_t *dbfindctx(const char *filename)
 
 void dbmem_info(pgctx_t *ctx)
 {
+	pmem_print_mem(&ctx->mm, _ptr(ctx, ctx->root->heap));
 }
 
 #ifdef WANT_UUID_TYPE
@@ -107,7 +108,8 @@ pgctx_t *dbfile_open(const char *filename, uint32_t initsize)
 		pool = pmem_pool_init((char*)ctx->mm.map[0].ptr+4096, ctx->mm.map[0].size-4096);
 		heap = pmem_pool_alloc(pool, 4096);
 		heap->nr_procheap = (4096-sizeof(*heap)) / sizeof(procheap_t);
-		heap->pool.freelist = _offset(ctx, pool);
+		heap->mempool = _offset(ctx, pool);
+		pmem_relist_pools(&ctx->mm, heap);
 		r->heap = _offset(ctx, heap);
 
 		// Create the root data dictionary
@@ -148,7 +150,7 @@ void dbfile_close(pgctx_t *ctx)
 			dbctx[i] = NULL;
 		}
 	}
-	pmem_retire(&ctx->mm, _ptr(ctx, ctx->root->heap));
+	pmem_retire(&ctx->mm, _ptr(ctx, ctx->root->heap), 0);
         mm_close(&ctx->mm);
 }
 
@@ -278,10 +280,11 @@ int _db_gc(pgctx_t *ctx, gcstats_t *stats)
 	_dblockop(ctx, MLCK_WR, ctx->root->lock);
 	_dblockop(ctx, MLCK_UN, ctx->root->lock);
 
-	// Eliminate the const booleans
+	// Eliminate the structures used by the memory subsystem itself
 	gc_keep(ctx, heap);
-	//gc_keep(ctx, _ptr(ctx, ctx->root->booleans[0]));
-	//gc_keep(ctx, _ptr(ctx, ctx->root->booleans[1]));
+	gc_keep(ctx, _ptr(ctx, heap->pool));
+
+	// Eliminated references in the meta table
 	if (isPtr(ctx->root->meta.id.type)) {
 		gc_keep(ctx, dbptr(ctx, ctx->root->meta.id));
 	}

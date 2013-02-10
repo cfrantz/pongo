@@ -4,7 +4,9 @@
 #include <pongo/stdtypes.h>
 #include <pongo/mmfile.h>
 
+#ifndef offsetof
 #define offsetof(st, el)  ((uintptr_t)(&((st*)0)->el))
+#endif
 #define PMEM_LOCKFREE 1
 #define PAGE_SIZE (4096)
 #define SMALLEST_ALLOC (16)
@@ -144,6 +146,7 @@ static inline void pmem_gc_keep(void *addr)
     memblock_t *mb;
     if (!addr) return;
     mb = (memblock_t*)addr - 1;
+    assert(mb->alloc);
     mb->gc = 0;
 }
 

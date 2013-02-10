@@ -388,6 +388,18 @@ char *dbprint(pgctx_t *ctx, dbtype_t t, char *buf, int n)
 		case String:
 			snprintf(buf, n, "u\"%s\"", ma);
 			break;
+		case Uuid:
+			snprintf(buf, n, "uuid(%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x)",
+				t.ptr->uuval[0], t.ptr->uuval[1],
+				t.ptr->uuval[2], t.ptr->uuval[3],
+				t.ptr->uuval[4], t.ptr->uuval[5],
+				t.ptr->uuval[6], t.ptr->uuval[7],
+				t.ptr->uuval[8], t.ptr->uuval[9],
+				t.ptr->uuval[10], t.ptr->uuval[11],
+				t.ptr->uuval[12], t.ptr->uuval[13],
+				t.ptr->uuval[14], t.ptr->uuval[15]);
+
+			break;
 		default:
 			snprintf(buf, n, "(type %d)", type);
 	}

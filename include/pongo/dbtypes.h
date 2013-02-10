@@ -89,10 +89,11 @@ extern int dbobject_delitem(pgctx_t *ctx, dbtype_t obj, dbtype_t key, dbtype_t *
 extern int dbobject_update(pgctx_t *ctx, dbtype_t obj, int n, updatecb_t elem, void *user, int sync);
 
 // In container_coll.c
-extern dbtype_t dbcollection_new(pgctx_t *ctx);
+extern dbtype_t dbcollection_new(pgctx_t *ctx, int multi);
 extern int dbcollection_len(pgctx_t *ctx, dbtype_t obj);
 extern int dbcollection_contains(pgctx_t *ctx, dbtype_t obj, dbtype_t key);
 extern int dbcollection_getitem(pgctx_t *ctx, dbtype_t obj, dbtype_t key, dbtype_t *value);
+extern int dbcollection_getnode(pgctx_t *ctx, dbtype_t obj, dbtype_t key, dbtype_t *value);
 extern int dbcollection_getstr(pgctx_t *ctx, dbtype_t obj, const char *key, dbtype_t *value);
 extern int dbcollection_setitem(pgctx_t *ctx, dbtype_t obj, dbtype_t key, dbtype_t value, int sync);
 extern int dbcollection_delitem(pgctx_t *ctx, dbtype_t obj, dbtype_t key, dbtype_t *value, int sync);

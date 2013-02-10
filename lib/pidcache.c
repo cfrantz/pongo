@@ -16,7 +16,7 @@ int pidcache_new(pgctx_t *ctx)
     root_pc = ctx->root->pidcache;
     _pid = getpid();
 	pid = dbint_new(ctx, _pid);
-	pc = dbcollection_new(ctx);
+	pc = dbcollection_new(ctx, 0);
 
 	if (dbcollection_setitem(ctx, root_pc, pid, pc, SET_OR_FAIL) < 0) {
         log_error("pid=%d: pidcache already exists", _pid);

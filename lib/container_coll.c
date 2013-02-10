@@ -47,11 +47,11 @@ int dbcollection_contains(pgctx_t *ctx, dbtype_t obj, dbtype_t key)
     return bonsai_find(ctx, obj.ptr->obj, key, NULL) == 0;
 }
 
-dbtype_t dbcollection_new(pgctx_t *ctx)
+dbtype_t dbcollection_new(pgctx_t *ctx, int multi)
 {
     dbtype_t obj;
     obj.ptr = dballoc(ctx, sizeof(dbcollection_t));
-    obj.ptr->type = Collection;
+    obj.ptr->type = multi ? MultiCollection : Collection;
     obj.ptr->obj = DBNULL;
     return dboffset(ctx, obj.ptr);
 }
@@ -61,7 +61,7 @@ int dbcollection_setitem(pgctx_t *ctx, dbtype_t obj, dbtype_t key, dbtype_t valu
     dbtype_t node, newnode;
 
     obj.ptr = dbptr(ctx, obj);
-    assert(obj.ptr->type == Collection);
+    assert(obj.ptr->type == Collection || obj.ptr->type == MultiCollection);
 
     if (sync & PUT_ID) {
         if (put_id_helper(ctx, &key, value) < 0)
@@ -74,7 +74,11 @@ int dbcollection_setitem(pgctx_t *ctx, dbtype_t obj, dbtype_t key, dbtype_t valu
         // Read-Copy-Update loop for safe modify
         node = obj.ptr->obj;
         rculoser(ctx);
-        newnode = bonsai_insert(ctx, node, key, value, sync & SET_OR_FAIL);
+        if (obj.ptr->type == Collection) {
+            newnode = bonsai_insert(ctx, node, key, value, sync & SET_OR_FAIL);
+        } else {
+            newnode = bonsai_multi_insert(ctx, node, key, value);
+        }
         if (newnode.type == Error) {
             rcureset(ctx);
             return -1;
@@ -88,6 +92,13 @@ int dbcollection_getitem(pgctx_t *ctx, dbtype_t obj, dbtype_t key, dbtype_t *val
 {
     obj.ptr = dbptr(ctx, obj);
     return bonsai_find(ctx, obj.ptr->obj, key, value);
+}
+
+int dbcollection_getnode(pgctx_t *ctx, dbtype_t obj, dbtype_t key, dbtype_t *value)
+{
+    obj.ptr = dbptr(ctx, obj);
+    *value = bonsai_find_node(ctx, obj.ptr->obj, key);
+    return value->all ? 0 : -1;
 }
 
 int dbcollection_getstr(pgctx_t *ctx, dbtype_t obj, const char *key, dbtype_t *value)
@@ -115,14 +126,18 @@ int dbcollection_delitem(pgctx_t *ctx, dbtype_t obj, dbtype_t key, dbtype_t *val
     dbtype_t node, newnode;
 
     obj.ptr = dbptr(ctx, obj);
-    assert(obj.ptr->type == Collection);
+    assert(obj.ptr->type == Collection || obj.ptr->type == MultiCollection);
     assert(ctx->winner.len == 0);
     assert(ctx->loser.len == 0);
     // Read-Copy-Update loop for safe modify
     do {
         node = obj.ptr->obj;
         rculoser(ctx);
-        newnode = bonsai_delete(ctx, node, key, value);
+        if (obj.ptr->type == Collection) {
+            newnode = bonsai_delete(ctx, node, key, value);
+        } else {
+            newnode = bonsai_multi_delete(ctx, node, key, *value);
+        }
         if (newnode.type == Error) {
             rcureset(ctx);
             return -1;

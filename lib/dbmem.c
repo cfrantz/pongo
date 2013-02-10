@@ -113,7 +113,7 @@ pgctx_t *dbfile_open(const char *filename, uint32_t initsize)
 		r->heap = _offset(ctx, heap);
 
 		// Create the root data dictionary
-		ctx->data = dbcollection_new(ctx);
+		ctx->data = dbcollection_new(ctx, 0);
 		r->data = ctx->data;
 
 		// Not sure about the atom cache...
@@ -121,7 +121,7 @@ pgctx_t *dbfile_open(const char *filename, uint32_t initsize)
 		//ctx->cache = dbcache_new(ctx, 0, 0);
 		//r->cache = ctx->cache;
 
-		r->pidcache = dbcollection_new(ctx);
+		r->pidcache = dbcollection_new(ctx, 0);
 		
 		r->meta.chunksize = initsize;
 		r->meta.id = dbstring_new(ctx, "_id", 3);
@@ -217,6 +217,12 @@ static void gc_walk_cache(pgctx_t *ctx, dbtype_t node)
 	gc_walk_cache(ctx, node.ptr->right);
 }
 
+static void printval(pgctx_t *ctx, dbtype_t val)
+{
+	char buf[100];
+	printf("%s\n", dbprint(ctx, val, buf, 100));
+}
+
 static void gc_walk(pgctx_t *ctx, dbtype_t root)
 {
 	int i;
@@ -241,12 +247,14 @@ static void gc_walk(pgctx_t *ctx, dbtype_t root)
 			if (obj) {
 				gc_keep(ctx, obj);
 				for(i=0; i<obj->len; i++) {
+					//printval(ctx, obj->item[i].key);
 					gc_walk(ctx, obj->item[i].key);
 					gc_walk(ctx, obj->item[i].value);
 				}
 			}
 			break;
 		case Collection:
+		case MultiCollection:
 			gc_walk(ctx, root.ptr->obj);
 			break;
 		case Cache:
@@ -254,8 +262,17 @@ static void gc_walk(pgctx_t *ctx, dbtype_t root)
 			break;
 		case _BonsaiNode:
 			gc_walk(ctx, root.ptr->left);
+			//printval(ctx, root.ptr->key);
 			gc_walk(ctx, root.ptr->key);
 			gc_walk(ctx, root.ptr->value);
+			gc_walk(ctx, root.ptr->right);
+			break;
+		case _BonsaiMultiNode:
+			gc_walk(ctx, root.ptr->left);
+			gc_walk(ctx, root.ptr->key);
+			for(i=0; i<root.ptr->nvalue; i++) {
+				gc_walk(ctx, root.ptr->values[i]);
+			}
 			gc_walk(ctx, root.ptr->right);
 			break;
 		default:

@@ -22,13 +22,15 @@ typedef enum {
 	// Container types (129-...)
 	List =		0x81,
 	Object =	0x82,
-	Collection =	0x83,
-	Cache =		0x84,
+	Collection =0x83,
+	MultiCollection=0x84,
+	Cache =     0x8f,
 
 	// Maintenence types for containers (193-255)
 	_InternalList=	0xc1,
 	_InternalObj=	0xc2,
-	_BonsaiNode=	0xc3
+	_BonsaiNode=	0xc3,
+	_BonsaiMultiNode=	0xc4
 } dbtag_t;
 
 #define isPtr(type) ((type & 7) == 0)
@@ -139,7 +141,8 @@ typedef struct {
 	dbtag_t type;
 	uint32_t refcnt; // used only by pidcache
 	uint64_t obj;
-    uint8_t _extra[48];
+	uint64_t index;
+    uint8_t _extra[40];
 } dbcollection_t;
 
 typedef struct {
@@ -157,6 +160,16 @@ typedef struct {
 	dbtype_t key, value;
 } dbnode_t;
 
+typedef struct {
+	dbtag_t type;
+	uint32_t _pad;
+	uint64_t size;
+	dbtype_t left, right;
+	dbtype_t key;
+    uint64_t nvalue;
+    dbtype_t values[];
+} dbmultinode_t;
+
 struct _dbval {
 	dbtag_t type;
 	union {
@@ -168,7 +181,14 @@ struct _dbval {
 				struct {
 					uint64_t size;
 					dbtype_t left, right;
-					dbtype_t key, value;
+					dbtype_t key;
+                    union {
+                        dbtype_t value;
+                        struct {
+                            uint64_t nvalue;
+                            dbtype_t values[];
+                        };
+                    };
 				};
 			};
 		};
@@ -184,6 +204,7 @@ struct _dbval {
 				volatile dbtype_t obj;
 				volatile dbtype_t cache;
 			};
+			volatile dbtype_t index; // only in collection objects
 		};
 	};
 };

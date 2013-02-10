@@ -30,8 +30,8 @@ PongoCollection_GetItem(PongoCollection *self, PyObject *key)
     dblock(self->ctx);
     k = from_python(self->ctx, key);
     if (!PyErr_Occurred()) {
-        if (dbcollection_getitem(SELF_CTX_AND_DBCOLL, k, &v) == 0) {
-            ret = to_python(self->ctx, v, 1);
+        if (dbcollection_getnode(SELF_CTX_AND_DBCOLL, k, &v) == 0) {
+            ret = to_python(self->ctx, v, TP_PROXY | TP_NODEVAL);
         } else {
             PyErr_SetObject(PyExc_KeyError, key);
         }
@@ -44,11 +44,21 @@ static int
 PongoCollection_SetItem(PongoCollection *self, PyObject *key, PyObject *value)
 {
     dbtype_t k;
-    dbtype_t v;
+    dbtype_t v = DBNULL;
     int ret = -1;
 
     dblock(self->ctx);
-    k = from_python(self->ctx, key);
+    if (PyTuple_Check(key)) {
+        if (PyTuple_Size(key) == 2) {
+            k = from_python(self->ctx, PyTuple_GetItem(key, 0));
+            v = from_python(self->ctx, PyTuple_GetItem(key, 1));
+        } else {
+            PyErr_Format(PyExc_ValueError, "key tuple must be a 2-tuple");
+        }
+    } else {
+        k = from_python(self->ctx, key);
+    }
+
     if (!PyErr_Occurred()) {
         if (value == NULL) {
             if (dbcollection_delitem(SELF_CTX_AND_DBCOLL, k, &v, self->ctx->sync) == 0) {
@@ -120,15 +130,15 @@ PongoCollection_get(PongoCollection *self, PyObject *args, PyObject *kwargs)
         if (dbtype(self->ctx, k) == List) {
             r = db_multi(SELF_CTX_AND_DBCOLL, k, multi_GET, &v, 0);
             if (r == 0) {
-                ret = to_python(self->ctx, v, 1);
+                ret = to_python(self->ctx, v, TP_PROXY);
             } else if (dflt) {
                 Py_INCREF(dflt);
                 ret = dflt;
             } else {
                 PyErr_SetObject(PyExc_KeyError, key);
             }
-        } else if (dbcollection_getitem(SELF_CTX_AND_DBCOLL, k, &v) == 0) {
-            ret = to_python(self->ctx, v, 1);
+        } else if (dbcollection_getnode(SELF_CTX_AND_DBCOLL, k, &v) == 0) {
+            ret = to_python(self->ctx, v, TP_PROXY | TP_NODEVAL);
         } else {
             if (dflt) {
                 ret = dflt; Py_INCREF(ret);
@@ -184,7 +194,7 @@ PongoCollection_set(PongoCollection *self, PyObject *args, PyObject *kwargs)
         } else if (db_multi(SELF_CTX_AND_DBCOLL, k, op, &v, sync) == 0) {
             // db_mutli will tell us the newly created value of
             // "_id" when PUT_ID is enabled.
-            ret = (sync & PUT_ID) ? to_python(self->ctx, v, 1) : Py_None;
+            ret = (sync & PUT_ID) ? to_python(self->ctx, v, TP_PROXY) : Py_None;
         } else {
             if (sync & PUT_ID) {
                 PyErr_Format(PyExc_ValueError, "value must be a dictionary");
@@ -203,7 +213,7 @@ PongoCollection_pop(PongoCollection *self, PyObject *args, PyObject *kwargs)
 {
     PyObject *key, *dflt = NULL;
     PyObject *ret = NULL;
-    dbtype_t k, v;
+    dbtype_t k, v = DBNULL;
     int sync = self->ctx->sync;
     char *kwlist[] = {"key", "default", "sync", NULL};
 
@@ -212,7 +222,17 @@ PongoCollection_pop(PongoCollection *self, PyObject *args, PyObject *kwargs)
         return NULL;
 
     dblock(self->ctx);
-    k = from_python(self->ctx, key);
+    if (PyTuple_Check(key)) {
+        if (PyTuple_Size(key) == 2) {
+            k = from_python(self->ctx, PyTuple_GetItem(key, 0));
+            v = from_python(self->ctx, PyTuple_GetItem(key, 1));
+        } else {
+            PyErr_Format(PyExc_ValueError, "key tuple must be a 2-tuple");
+        }
+    } else {
+        k = from_python(self->ctx, key);
+    }
+
     if (!PyErr_Occurred()) {
         if (dbcollection_delitem(SELF_CTX_AND_DBCOLL, k, &v, sync) < 0) {
             if (dflt) {
@@ -222,7 +242,7 @@ PongoCollection_pop(PongoCollection *self, PyObject *args, PyObject *kwargs)
                 PyErr_SetObject(PyExc_KeyError, key);
             }
         } else {
-            ret = to_python(self->ctx, v, 1);
+            ret = to_python(self->ctx, v, TP_PROXY);
         }
     }
     dbunlock(self->ctx);
@@ -238,23 +258,20 @@ static void
 kvi_helper(pgctx_t *ctx, dbtype_t node, void *user)
 {
     kvi_t *kvi = (kvi_t*)user;
-    PyObject *k, *v, *item;
+    PyObject *item;
 
-    node.ptr = dbptr(ctx, node);
     if (kvi->type == 0) {
-        item = to_python(ctx, node.ptr->key, 1);
+        item = to_python(ctx, node, TP_PROXY | TP_NODEKEY);
         PyList_Append(kvi->ob, item);
         Py_DECREF(item);
     } else if (kvi->type == 1) {
-        item = to_python(ctx, node.ptr->value, 1);
+        item = to_python(ctx, node, TP_PROXY | TP_NODEVAL);
         PyList_Append(kvi->ob, item);
         Py_DECREF(item);
     } else if (kvi->type == 2) {
-        k = to_python(ctx, node.ptr->key, 1);
-        v = to_python(ctx, node.ptr->value, 1);
-        item = Py_BuildValue("(OO)", k, v);
+        item = to_python(ctx, node, TP_PROXY | TP_NODEKEY | TP_NODEVAL);
         PyList_Append(kvi->ob, item);
-        Py_DECREF(k); Py_DECREF(v); Py_DECREF(item);
+        Py_DECREF(item);
     } else {
     }
 }
@@ -312,6 +329,20 @@ PongoCollection_native(PongoCollection *self)
     dblock(self->ctx);
     ret = to_python(SELF_CTX_AND_DBCOLL, 0);
     dbunlock(self->ctx);
+    return ret;
+}
+
+static PyObject *
+PongoCollection_multi(PongoCollection *self)
+{
+    PyObject *ret;
+    dbtype_t obj;
+
+    dblock(self->ctx);
+    obj.ptr = dbptr(self->ctx, self->dbcoll);
+    ret = obj.ptr->type == MultiCollection ? Py_True : Py_False;
+    dbunlock(self->ctx);
+    Py_INCREF(ret);
     return ret;
 }
 
@@ -404,11 +435,11 @@ PongoCollection_search(PongoCollection *self, PyObject *args)
     if (dbtype(self->ctx, dbpath) == List) {
         dbvalue = from_python(self->ctx, value);
         if (!PyErr_Occurred()) {
-            dbrslt = dbcollection_new(self->ctx);
+            dbrslt = dbcollection_new(self->ctx, 0);
             db_search(SELF_CTX_AND_DBCOLL, dbpath, -1, relop, dbvalue, dbrslt);
-            // proxy=-1 means turn the root object into a real dict, but
+            // PROXYCHLD means turn the root object into a real dict, but
             // create proxy objects for all children.
-            ret = to_python(self->ctx, dbrslt, -1);
+            ret = to_python(self->ctx, dbrslt, TP_PROXYCHLD);
         }
     } else {
         PyErr_Format(PyExc_Exception, "path type isn't List (%d)", dbtype(self->ctx, dbpath));
@@ -418,18 +449,21 @@ PongoCollection_search(PongoCollection *self, PyObject *args)
 }
 
 static PyObject *
-PongoCollection_create(PyObject *self, PyObject *arg)
+PongoCollection_create(PyObject *self, PyObject *args)
 {
     PyObject *ret;
-    PongoCollection *ref = (PongoCollection*)arg;
+    PongoCollection *ref = NULL;
     dbtype_t coll;
+    int multi = 0;
 
+    if (!PyArg_ParseTuple(args, "Oi:create", &ref, &multi))
+        return NULL;
     if (pongo_check(ref))
         return NULL;
 
     dblock(ref->ctx);
-    coll = dbcollection_new(ref->ctx);
-    ret = to_python(ref->ctx, coll, 1);
+    coll = dbcollection_new(ref->ctx, multi);
+    ret = to_python(ref->ctx, coll, TP_PROXY);
     dbunlock(ref->ctx);
     return ret;
 }
@@ -452,6 +486,54 @@ void PongoCollection_Del(PyObject *ob)
     PyObject_Del(ob);
 }
 
+static PyObject *
+PongoCollection_getattr(PyObject *ob, PyObject *name)
+{
+    PongoCollection *self = (PongoCollection*)ob;
+    dbtype_t coll;
+    char *buf;
+
+    buf = PyString_AsString(name);
+    if (buf && !strcmp(buf, "index")) {
+        dblock(self->ctx);
+        coll.ptr = dbptr(self->ctx, self->dbcoll);
+        if (self->index.all != coll.ptr->index.all) {
+            self->index = coll.ptr->index;
+            self->index_ob = to_python(self->ctx, self->index, TP_PROXY);
+        }
+        dbunlock(self->ctx);
+    }
+    return PyObject_GenericGetAttr(ob, name);
+}
+
+static int
+PongoCollection_setattr(PyObject *ob, PyObject *name, PyObject *value)
+{
+    PongoCollection *self = (PongoCollection*)ob;
+    dbtype_t coll;
+    char *buf;
+
+    buf = PyString_AsString(name);
+    if (buf && !strcmp(buf, "index")) {
+        dblock(self->ctx);
+        coll.ptr = dbptr(self->ctx, self->dbcoll);
+        if (value) {
+            coll.ptr->index = from_python(self->ctx, value);
+        } else {
+            coll.ptr->index = DBNULL;
+        }
+
+        // We can just zap these out, since these aren't used until
+        // the user gets them via getattr.
+        self->index = DBNULL;
+        Py_XDECREF(self->index_ob);
+        self->index_ob = NULL;
+        dbunlock(self->ctx);
+        return 0;
+    }
+    return PyObject_GenericSetAttr(ob, name, value);
+}
+
 static PyMappingMethods pydbdict_as_mapping = {
     (lenfunc)PongoCollection_length,           /* mp_length */
     (binaryfunc)PongoCollection_GetItem,       /* mp_subscript */
@@ -471,7 +553,7 @@ static PySequenceMethods pydbdict_as_sequence = {
     NULL,                               /* sq_inplace_repeat */
 };
 
-static PyMethodDef pydbdict_methods[] = {
+static PyMethodDef pycoll_methods[] = {
     {"get",     (PyCFunction)PongoCollection_get,          METH_VARARGS|METH_KEYWORDS, NULL },
     {"set",     (PyCFunction)PongoCollection_set,          METH_VARARGS|METH_KEYWORDS, NULL },
     {"pop",     (PyCFunction)PongoCollection_pop,          METH_VARARGS|METH_KEYWORDS, NULL },
@@ -479,10 +561,16 @@ static PyMethodDef pydbdict_methods[] = {
     {"values",  (PyCFunction)PongoCollection_values,       METH_NOARGS, NULL },
     {"items",   (PyCFunction)PongoCollection_items,        METH_NOARGS, NULL },
     {"native",  (PyCFunction)PongoCollection_native,       METH_NOARGS, NULL },
-    {"create",  (PyCFunction)PongoCollection_create,       METH_STATIC|METH_O, NULL },
+    {"multi",   (PyCFunction)PongoCollection_multi,        METH_NOARGS, NULL },
+    {"create",  (PyCFunction)PongoCollection_create,       METH_STATIC|METH_VARARGS, NULL },
     {"json",    (PyCFunction)PongoCollection_json,         METH_VARARGS, NULL },
     {"search",  (PyCFunction)PongoCollection_search,       METH_VARARGS, NULL },
     { NULL, NULL },
+};
+
+static PyMemberDef pycoll_members[] = {
+    {"index", T_OBJECT_EX, offsetof(PongoCollection, index_ob), 0, NULL },
+    { 0 },
 };
 
 PyTypeObject PongoCollection_Type = {
@@ -503,8 +591,8 @@ PyTypeObject PongoCollection_Type = {
     0,                         /*tp_hash */
     0,                         /*tp_call*/
     0,                         /*tp_str*/
-    0,                         /*tp_getattro*/
-    0,                         /*tp_setattro*/
+    PongoCollection_getattr,                         /*tp_getattro*/
+    PongoCollection_setattr,                         /*tp_setattro*/
     0,                         /*tp_as_buffer*/
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,        /*tp_flags*/
     "PongoDB Collection Proxy",           /* tp_doc */
@@ -514,8 +602,8 @@ PyTypeObject PongoCollection_Type = {
     0,                         /* tp_weaklistoffset */
     0,                         /* tp_iter */
     0,                         /* tp_iternext */
-    pydbdict_methods,          /* tp_methods */
-    0,             /* tp_members */
+    pycoll_methods,          /* tp_methods */
+    pycoll_members,            /* tp_members */
     0,                         /* tp_getset */
     0,                         /* tp_base */
     0,                         /* tp_dict */

@@ -30,7 +30,7 @@ PongoDict_GetItem(PongoDict *self, PyObject *key)
     k = from_python(self->ctx, key);
     if (!PyErr_Occurred()) {
         if (dbobject_getitem(SELF_CTX_AND_DBOBJ, k, &v) == 0) {
-            ret = to_python(self->ctx, v, 1);
+            ret = to_python(self->ctx, v, TP_PROXY);
         } else {
             PyErr_SetObject(PyExc_KeyError, key);
         }
@@ -119,7 +119,7 @@ PongoDict_get(PongoDict *self, PyObject *args, PyObject *kwargs)
         if (dbtype(self->ctx, k) == List) {
             r = db_multi(SELF_CTX_AND_DBOBJ, k, multi_GET, &v, 0);
             if (r == 0) {
-                ret = to_python(self->ctx, v, 1);
+                ret = to_python(self->ctx, v, TP_PROXY);
             } else if (dflt) {
                 Py_INCREF(dflt);
                 ret = dflt;
@@ -127,7 +127,7 @@ PongoDict_get(PongoDict *self, PyObject *args, PyObject *kwargs)
                 PyErr_SetObject(PyExc_KeyError, key);
             }
         } else if (dbobject_getitem(SELF_CTX_AND_DBOBJ, k, &v) == 0) {
-            ret = to_python(self->ctx, v, 1);
+            ret = to_python(self->ctx, v, TP_PROXY);
         } else {
             if (dflt) {
                 ret = dflt; Py_INCREF(ret);
@@ -183,7 +183,7 @@ PongoDict_set(PongoDict *self, PyObject *args, PyObject *kwargs)
         } else if (db_multi(SELF_CTX_AND_DBOBJ, k, op, &v, sync) == 0) {
             // db_mutli will tell us the newly created value of
             // "_id" when PUT_ID is enabled.
-            ret = (sync & PUT_ID) ? to_python(self->ctx, v, 1) : Py_None;
+            ret = (sync & PUT_ID) ? to_python(self->ctx, v, TP_PROXY) : Py_None;
         } else {
             if (sync & PUT_ID) {
                 PyErr_Format(PyExc_ValueError, "value must be a dictionary");
@@ -221,7 +221,7 @@ PongoDict_pop(PongoDict *self, PyObject *args, PyObject *kwargs)
                 PyErr_SetObject(PyExc_KeyError, key);
             }
         } else {
-            ret = to_python(self->ctx, v, 1);
+            ret = to_python(self->ctx, v, TP_PROXY);
         }
     }
     dbunlock(self->ctx);
@@ -243,7 +243,7 @@ PongoDict_keys(PongoDict *self) {
     for(i=0; i<obj->len; i++) {
         // FIXME: NULL is a valid key?
         if (obj->item[i].key.all) {
-            item = to_python(self->ctx, obj->item[i].key, 1);
+            item = to_python(self->ctx, obj->item[i].key, TP_PROXY);
             PyList_Append(ret, item);
             Py_DECREF(item);
         }
@@ -267,7 +267,7 @@ PongoDict_values(PongoDict *self)
     for(i=0; i<obj->len; i++) {
         // FIXME: NULL is a valid key?
         if (obj->item[i].key.all) {
-            item = to_python(self->ctx, obj->item[i].value, 1);
+            item = to_python(self->ctx, obj->item[i].value, TP_PROXY);
             PyList_Append(ret, item);
             Py_DECREF(item);
         }
@@ -290,8 +290,8 @@ PongoDict_items(PongoDict *self) {
     for(i=0; i<obj->len; i++) {
         // FIXME: NULL is a valid key?
         if (obj->item[i].key.all) {
-            k = to_python(self->ctx, obj->item[i].key, 1);
-            v = to_python(self->ctx, obj->item[i].value, 1);
+            k = to_python(self->ctx, obj->item[i].key, TP_PROXY);
+            v = to_python(self->ctx, obj->item[i].value, TP_PROXY);
             item = Py_BuildValue("(OO)", k, v);
             PyList_Append(ret, item);
             Py_DECREF(k); Py_DECREF(v); Py_DECREF(item);
@@ -400,11 +400,11 @@ PongoDict_search(PongoDict *self, PyObject *args)
     if (dbtype(self->ctx, dbpath) == List) {
         dbvalue = from_python(self->ctx, value);
         if (!PyErr_Occurred()) {
-            dbrslt = dbcollection_new(self->ctx);
+            dbrslt = dbcollection_new(self->ctx, 0);
             db_search(SELF_CTX_AND_DBOBJ, dbpath, -1, relop, dbvalue, dbrslt);
-            // proxy=-1 means turn the root object into a real dict, but
+            // PROXYCHLD means turn the root object into a real dict, but
             // create proxy objects for all children.
-            ret = to_python(self->ctx, dbrslt, -1);
+            ret = to_python(self->ctx, dbrslt, TP_PROXYCHLD);
         }
     } else {
         PyErr_Format(PyExc_Exception, "path type isn't List (%d)", dbtype(self->ctx, dbpath));
@@ -425,7 +425,7 @@ PongoDict_create(PyObject *self, PyObject *arg)
 
     dblock(ref->ctx);
     dict = dbobject_new(ref->ctx);
-    ret = to_python(ref->ctx, dict, 1);
+    ret = to_python(ref->ctx, dict, TP_PROXY);
     dbunlock(ref->ctx);
     return ret;
 }

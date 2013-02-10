@@ -26,7 +26,7 @@ pongo_newkey_helper(pgctx_t *ctx, dbtype_t value)
 }
 
 typedef struct {
-    int proxy;
+    int flags;
     dbtag_t type;
     PyObject *ob;
 } tphelper_t;
@@ -35,21 +35,21 @@ static void
 to_python_helper(pgctx_t *ctx, dbtype_t node, void *user)
 {
     tphelper_t *h = (tphelper_t*)user;
-    PyObject *k, *v;
+    PyObject *kv;
 
-    node.ptr = dbptr(ctx, node);
-    if (h->type == Collection) {
-        k = to_python(ctx, node.ptr->key, h->proxy);
-        v = to_python(ctx, node.ptr->value, h->proxy);
-        PyDict_SetItem(h->ob, k, v);
-        Py_DECREF(k); Py_DECREF(v);
+    if (h->type == Collection || h->type == MultiCollection) {
+        kv = to_python(ctx, node, h->flags);
+        PyDict_SetItem(h->ob, 
+                PyTuple_GET_ITEM(kv, 0),
+                PyTuple_GET_ITEM(kv, 1));
+        Py_DECREF(kv);
     } else {
         //FIXME: exception
     }
 }
 
 PyObject *
-to_python(pgctx_t *ctx, dbtype_t db, int proxy)
+to_python(pgctx_t *ctx, dbtype_t db, int flags)
 {
     dbtag_t type;
     dbval_t *dv = NULL;
@@ -128,31 +128,31 @@ to_python(pgctx_t *ctx, dbtype_t db, int proxy)
                     tm.tm_hour, tm.tm_min, tm.tm_sec, usec);
             break;
         case List:
-            if (proxy==1) {
+            if (flags & TP_PROXY) {
                 ob = PongoList_Proxy(ctx, db);
                 pidcache_put(ctx, ob, db);
             } else {
-                if (proxy == -1) proxy = 1;
+                if (flags & TP_PROXYCHLD) flags = (flags & ~TP_PROXYCHLD) | TP_PROXY;
                 list = dbptr(ctx, dv->list);
-                ob = PyList_New(0);
+                ob = PyList_New(list->len);
                 for(i=0; i<list->len; i++) {
-                    v = to_python(ctx, list->item[i], proxy);
-                    PyList_Append(ob, v);
-                    Py_DECREF(v);
+                    v = to_python(ctx, list->item[i], flags);
+                    PyList_SET_ITEM(ob, i, v);
+                    // Don't need to decref v since SET_ITEM steals the reference
                 }
             }
             break;
         case Object:
-            if (proxy==1) {
+            if (flags & TP_PROXY) {
                 ob = PongoDict_Proxy(ctx, db);
                 pidcache_put(ctx, ob, db);
             } else {
-                if (proxy == -1) proxy = 1;
+                if (flags & TP_PROXYCHLD) flags = (flags & ~TP_PROXYCHLD) | TP_PROXY;
                 obj = dbptr(ctx, dv->obj);
                 ob = PyDict_New();
                 for(i=0; i<obj->len; i++) {
-                    k = to_python(ctx, obj->item[i].key, proxy);
-                    v = to_python(ctx, obj->item[i].value, proxy);
+                    k = to_python(ctx, obj->item[i].key, flags);
+                    v = to_python(ctx, obj->item[i].value, flags);
                     PyDict_SetItem(ob, k, v);
                     Py_DECREF(k); Py_DECREF(v);
                 }
@@ -161,15 +161,42 @@ to_python(pgctx_t *ctx, dbtype_t db, int proxy)
         case Cache:
             // The cache is a collection
         case Collection:
-            if (proxy == 1) {
+        case MultiCollection:
+            if (flags & TP_PROXY) {
                 ob = PongoCollection_Proxy(ctx, db);
                 pidcache_put(ctx, ob, db);
             } else {
-                if (proxy == -1) proxy = 1;
-                h.proxy = proxy;
+                if (flags & TP_PROXYCHLD) flags = (flags & ~TP_PROXYCHLD) | TP_PROXY;
+                h.flags = flags;
                 h.type = Collection;
                 h.ob = ob = PyDict_New();
                 bonsai_foreach(ctx, dv->obj, to_python_helper, &h);
+            }
+            break;
+
+        case _BonsaiNode:
+        case _BonsaiMultiNode:
+            k = v = NULL;
+            if (flags & TP_NODEKEY) {
+                k = to_python(ctx, dv->key, flags & ~(TP_NODEKEY|TP_NODEVAL));
+                ob = k;
+            }
+            if (flags & TP_NODEVAL) {
+                if (type == _BonsaiMultiNode) {
+                    v = PyTuple_New(dv->nvalue);
+                    for(i=0; i<dv->nvalue; i++) {
+                        ob = to_python(ctx, dv->values[i], flags & ~(TP_NODEKEY|TP_NODEVAL));
+                        PyTuple_SET_ITEM(v, i, ob);
+                        // Don't need to decref ob since SET_ITEM steals the reference
+                    }
+                } else {
+                    v = to_python(ctx, dv->value, flags & ~(TP_NODEKEY|TP_NODEVAL));
+                }
+                ob = v;
+            }
+            if (k && v) {
+                ob = PyTuple_Pack(2, k, v);
+                Py_DECREF(k); Py_DECREF(v);
             }
             break;
         default:

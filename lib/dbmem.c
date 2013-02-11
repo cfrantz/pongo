@@ -191,7 +191,9 @@ void dbunlock(pgctx_t *ctx)
 
 void *dballoc(pgctx_t *ctx, unsigned size)
 {
-	return pmem_alloc(&ctx->mm, _ptr(ctx, ctx->root->heap), size);
+	void *addr;
+	addr = pmem_alloc(&ctx->mm, _ptr(ctx, ctx->root->heap), size);
+	return addr;
 }
 
 /*
@@ -204,6 +206,7 @@ void dbfree(pgctx_t *ctx, void *addr)
 
 static void gc_keep(pgctx_t *ctx, void *addr)
 {
+	//memblock_t *mb = (memblock_t*)addr - 1;
 	//printf("keeping type %02x at %p (%d bytes)\n", *(uint32_t*)addr, addr, psize(mb, addr));
 	pmem_gc_keep(addr);
 }

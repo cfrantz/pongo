@@ -144,6 +144,7 @@ static inline void pmem_gc_keep(void *addr)
     memblock_t *mb;
     if (!addr) return;
     mb = (memblock_t*)addr - 1;
+    assert(mb->alloc);
     mb->gc = 0;
 }
 

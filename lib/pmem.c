@@ -55,7 +55,7 @@ void *pmem_pool_alloc(mempool_t *pool, uint32_t size)
 
     do {
         ret = NULL;
-        psz = -1;
+        psz = -1; // UINT_MAX
 
         // Scan the pool descriptors for the smallest block that will
         // satisfy the request
@@ -74,6 +74,8 @@ void *pmem_pool_alloc(mempool_t *pool, uint32_t size)
         newdesc = desc;
         newdesc.e_ofs -= size;
         ret = ((uint8_t*)pool + newdesc.e_ofs);
+#if 0
+        // FIXME: this doesn't work correctly.
         if (newdesc.e_ofs - newdesc.s_ofs < SMALLEST_POOL_ALLOC) {
             // if we would cut the block into an unusable chunk,
             // then just claim the whole thing.
@@ -81,6 +83,7 @@ void *pmem_pool_alloc(mempool_t *pool, uint32_t size)
             // Can't mark the 0-th descriptor as free
             if (p) newdesc.all = 0;
         }
+#endif
     } while (!cmpxchg64(&pool->desc[p], desc.all, newdesc.all));
 
     if (ret) {

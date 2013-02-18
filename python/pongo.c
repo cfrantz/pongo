@@ -198,7 +198,14 @@ to_python(pgctx_t *ctx, dbtype_t db, int flags)
                 ob = PyTuple_Pack(2, k, v);
                 Py_DECREF(k); Py_DECREF(v);
             }
+            if (!k && !v) {
+                ob = PongoPointer_Proxy(ctx, db);
+            }
             break;
+        case _InternalList:
+        case _InternalObj:
+                ob = PongoPointer_Proxy(ctx, db);
+                break;
         default:
             PyErr_Format(PyExc_Exception, "Cannot handle dbtype %d", type);
     }
@@ -279,8 +286,12 @@ from_python(pgctx_t *ctx, PyObject *ob)
         //db = dbbuffer_new(ctx, buf, length);
         db = dbstring_new(ctx, buf, length);
     } else if (PyUnicode_Check(ob)) {
-        PyString_AsStringAndSize(ob, &buf, &length);
-        db = dbstring_new(ctx, buf, length);
+        ob = PyUnicode_AsUTF8String(ob);
+        if (ob) {
+            PyString_AsStringAndSize(ob, &buf, &length);
+            db = dbstring_new(ctx, buf, length);
+            Py_DECREF(ob);
+        }
     } else if (PyDateTime_Check(ob)) {
         memset(&tm, 0, sizeof(tm));
         tm.tm_year = PyDateTime_GET_YEAR(ob);
@@ -298,6 +309,18 @@ from_python(pgctx_t *ctx, PyObject *ob)
         PyString_AsStringAndSize(ob, &buf, &length);
         db = dbuuid_new(ctx, (uint8_t*)buf);
 #endif
+    } else if (Py_TYPE(ob) == &PongoList_Type) {
+        // Resolve proxy types back to their original dbtype
+        PongoList *p = (PongoList*)ob;
+        db = p->dblist;
+    } else if (Py_TYPE(ob) == &PongoDict_Type) {
+        // Resolve proxy types back to their original dbtype
+        PongoDict *p = (PongoDict*)ob;
+        db = p->dbobj;
+    } else if (Py_TYPE(ob) == &PongoCollection_Type) {
+        // Resolve proxy types back to their original dbtype
+        PongoCollection *p = (PongoCollection*)ob;
+        db = p->dbcoll;
     } else if (PyMapping_Check(ob)) {
         length = PyMapping_Length(ob);
         items = PyMapping_Items(ob);
@@ -319,18 +342,6 @@ from_python(pgctx_t *ctx, PyObject *ob)
         length = PySequence_Length(ob);
         db = dblist_new(ctx);
         dblist_extend(ctx, db, length, sequence_cb, ob, NOSYNC);
-    } else if (Py_TYPE(ob) == &PongoList_Type) {
-        // Resolve proxy types back to their original dbtype
-        PongoList *p = (PongoList*)ob;
-        db = p->dblist;
-    } else if (Py_TYPE(ob) == &PongoDict_Type) {
-        // Resolve proxy types back to their original dbtype
-        PongoDict *p = (PongoDict*)ob;
-        db = p->dbobj;
-    } else if (Py_TYPE(ob) == &PongoCollection_Type) {
-        // Resolve proxy types back to their original dbtype
-        PongoCollection *p = (PongoCollection*)ob;
-        db = p->dbcoll;
     } else {
         // FIXME: Unknown object type
         PyErr_SetObject(PyExc_TypeError, (PyObject*)Py_TYPE(ob));
@@ -602,13 +613,19 @@ PyMODINIT_FUNC init_pongo(void)
     PyType_Ready(&PongoList_Type);
     PyType_Ready(&PongoDict_Type);
     PyType_Ready(&PongoCollection_Type);
+    PyType_Ready(&PongoPointer_Type);
+    PyType_Ready(&PongoIter_Type);
 
     Py_INCREF(&PongoList_Type);
     Py_INCREF(&PongoDict_Type);
     Py_INCREF(&PongoCollection_Type);
+    Py_INCREF(&PongoPointer_Type);
+    Py_INCREF(&PongoIter_Type);
     PyModule_AddObject(m, "PongoList", (PyObject*)&PongoList_Type);
     PyModule_AddObject(m, "PongoDict", (PyObject*)&PongoDict_Type);
     PyModule_AddObject(m, "PongoCollection", (PyObject*)&PongoCollection_Type);
+    PyModule_AddObject(m, "PongoPointer", (PyObject*)&PongoPointer_Type);
+    PyModule_AddObject(m, "PongoIter", (PyObject*)&PongoIter_Type);
 
     pongo_id = PyObject_CallFunction((PyObject*)&PyBaseObject_Type, NULL);
     PyModule_AddObject(m, "id", pongo_id);

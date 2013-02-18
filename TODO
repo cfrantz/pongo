@@ -4,10 +4,18 @@ TODO List:
 Indexes: build alternate bonsai trees for fast object lookups on
 alternate fields.
 
+Common PongoObject header in pongo.h
 
-json:select for querying.
+Unlock the GIL
+
+Thread safety (rcu loser/winer lists)
+
+Documentation
+
+Test cases/code coverage
 
 
+json:select or similar for querying.
 
 Generic object recreation registry.
 	a) __jsonclass__

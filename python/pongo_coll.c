@@ -456,7 +456,7 @@ PongoCollection_create(PyObject *self, PyObject *args)
     dbtype_t coll;
     int multi = 0;
 
-    if (!PyArg_ParseTuple(args, "Oi:create", &ref, &multi))
+    if (!PyArg_ParseTuple(args, "O|i:create", &ref, &multi))
         return NULL;
     if (pongo_check(ref))
         return NULL;
@@ -600,7 +600,7 @@ PyTypeObject PongoCollection_Type = {
     0,                         /* tp_clear */
     0,                         /* tp_richcompare */
     0,                         /* tp_weaklistoffset */
-    0,                         /* tp_iter */
+    PongoIter_Iter,                         /* tp_iter */
     0,                         /* tp_iternext */
     pycoll_methods,          /* tp_methods */
     pycoll_members,            /* tp_members */

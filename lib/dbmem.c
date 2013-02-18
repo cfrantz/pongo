@@ -220,12 +220,6 @@ static void gc_walk_cache(pgctx_t *ctx, dbtype_t node)
 	gc_walk_cache(ctx, node.ptr->right);
 }
 
-static void printval(pgctx_t *ctx, dbtype_t val)
-{
-	char buf[100];
-	printf("%s\n", dbprint(ctx, val, buf, 100));
-}
-
 static void gc_walk(pgctx_t *ctx, dbtype_t root)
 {
 	int i;
@@ -238,19 +232,24 @@ static void gc_walk(pgctx_t *ctx, dbtype_t root)
 	gc_keep(ctx, root.ptr);
 	switch(root.ptr->type) {
 		case List:
-			list = dbptr(ctx, root.ptr->list);
+			root.ptr = dbptr(ctx, root.ptr->list);
+			gc_keep(ctx, root.ptr);
+			// Fall-thru is intentional
+		case _InternalList:
+			list = (_list_t*)root.ptr;
 			if (list) {
-				gc_keep(ctx, list);
 				for(i=0; i<list->len; i++) 
 					gc_walk(ctx, list->item[i]);
 			}
 			break;
 		case Object:
-			obj = dbptr(ctx, root.ptr->obj);
+			root.ptr = dbptr(ctx, root.ptr->obj);
+			gc_keep(ctx, root.ptr);
+			// Fall-thru is intentional
+		case _InternalObj:
+			obj = (_obj_t*)root.ptr;
 			if (obj) {
-				gc_keep(ctx, obj);
 				for(i=0; i<obj->len; i++) {
-					//printval(ctx, obj->item[i].key);
 					gc_walk(ctx, obj->item[i].key);
 					gc_walk(ctx, obj->item[i].value);
 				}
@@ -265,7 +264,6 @@ static void gc_walk(pgctx_t *ctx, dbtype_t root)
 			break;
 		case _BonsaiNode:
 			gc_walk(ctx, root.ptr->left);
-			//printval(ctx, root.ptr->key);
 			gc_walk(ctx, root.ptr->key);
 			gc_walk(ctx, root.ptr->value);
 			gc_walk(ctx, root.ptr->right);

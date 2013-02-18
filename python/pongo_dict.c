@@ -508,7 +508,7 @@ PyTypeObject PongoDict_Type = {
     0,                         /* tp_clear */
     0,                         /* tp_richcompare */
     0,                         /* tp_weaklistoffset */
-    0,                         /* tp_iter */
+    PongoIter_Iter,                         /* tp_iter */
     0,                         /* tp_iternext */
     pydbdict_methods,          /* tp_methods */
     0,             /* tp_members */

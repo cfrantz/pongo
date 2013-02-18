@@ -6,6 +6,8 @@ sources = [
     'python/pongo_list.c',
     'python/pongo_dict.c',
     'python/pongo_coll.c',
+    'python/pongo_ptr.c',
+    'python/pongo_iter.c',
 ]
 coverage = []
 #coverage = ['-fprofile-arcs', '-ftest-coverage']

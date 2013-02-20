@@ -17,7 +17,7 @@ PongoCollection_Proxy(pgctx_t *ctx, dbtype_t db)
         return NULL;
 
     self->ctx = ctx;
-    self->dbcoll = db;
+    self->dbptr = db;
     return (PyObject *)self;
 }
 
@@ -30,7 +30,7 @@ PongoCollection_GetItem(PongoCollection *self, PyObject *key)
     dblock(self->ctx);
     k = from_python(self->ctx, key);
     if (!PyErr_Occurred()) {
-        if (dbcollection_getnode(SELF_CTX_AND_DBCOLL, k, &v) == 0) {
+        if (dbcollection_getnode(SELF_CTX_AND_DBPTR, k, &v) == 0) {
             ret = to_python(self->ctx, v, TP_PROXY | TP_NODEVAL);
         } else {
             PyErr_SetObject(PyExc_KeyError, key);
@@ -61,14 +61,14 @@ PongoCollection_SetItem(PongoCollection *self, PyObject *key, PyObject *value)
 
     if (!PyErr_Occurred()) {
         if (value == NULL) {
-            if (dbcollection_delitem(SELF_CTX_AND_DBCOLL, k, &v, self->ctx->sync) == 0) {
+            if (dbcollection_delitem(SELF_CTX_AND_DBPTR, k, &v, self->ctx->sync) == 0) {
                 ret = 0;
             } else {
                 PyErr_SetObject(PyExc_KeyError, key);
             }
         } else {
             v = from_python(self->ctx, value);
-            if (!PyErr_Occurred() && dbcollection_setitem(SELF_CTX_AND_DBCOLL, k, v, self->ctx->sync) == 0)
+            if (!PyErr_Occurred() && dbcollection_setitem(SELF_CTX_AND_DBPTR, k, v, self->ctx->sync) == 0)
                 ret = 0;
         }
     }
@@ -82,7 +82,7 @@ PongoCollection_length(PongoCollection *self)
     int len;
 
     dblock(self->ctx);
-    len = dbcollection_len(SELF_CTX_AND_DBCOLL);
+    len = dbcollection_len(SELF_CTX_AND_DBPTR);
     dbunlock(self->ctx);
     return len;
 }
@@ -96,7 +96,7 @@ PongoCollection_contains(PongoCollection *self, PyObject *key)
     dblock(self->ctx);
     k = from_python(self->ctx, key);
     if (!PyErr_Occurred()) {
-        ret = dbcollection_contains(SELF_CTX_AND_DBCOLL, k);
+        ret = dbcollection_contains(SELF_CTX_AND_DBPTR, k);
     }
     dbunlock(self->ctx);
     return ret;
@@ -132,7 +132,7 @@ PongoCollection_get(PongoCollection *self, PyObject *args, PyObject *kwargs)
 
     if (!PyErr_Occurred()) {
         if (dbtype(self->ctx, k) == List) {
-            r = db_multi(SELF_CTX_AND_DBCOLL, k, multi_GET, &v, 0);
+            r = db_multi(SELF_CTX_AND_DBPTR, k, multi_GET, &v, 0);
             if (r == 0) {
                 ret = to_python(self->ctx, v, TP_PROXY);
             } else if (dflt) {
@@ -141,7 +141,7 @@ PongoCollection_get(PongoCollection *self, PyObject *args, PyObject *kwargs)
             } else {
                 PyErr_SetObject(PyExc_KeyError, key);
             }
-        } else if (dbcollection_getnode(SELF_CTX_AND_DBCOLL, k, &v) == 0) {
+        } else if (dbcollection_getnode(SELF_CTX_AND_DBPTR, k, &v) == 0) {
             ret = to_python(self->ctx, v, TP_PROXY | TP_NODEVAL);
         } else {
             if (dflt) {
@@ -197,12 +197,12 @@ PongoCollection_set(PongoCollection *self, PyObject *args, PyObject *kwargs)
     if (!PyErr_Occurred()) {
         if (dbtype(self->ctx, k) == List) {
             if (fail) op = multi_SET_OR_FAIL;
-            if (db_multi(SELF_CTX_AND_DBCOLL, k, op, &v, sync) == 0) {
+            if (db_multi(SELF_CTX_AND_DBPTR, k, op, &v, sync) == 0) {
                 ret = Py_None;
             } else {
                 PyErr_SetObject(PyExc_KeyError, key);
             }
-        } else if (db_multi(SELF_CTX_AND_DBCOLL, k, op, &v, sync) == 0) {
+        } else if (db_multi(SELF_CTX_AND_DBPTR, k, op, &v, sync) == 0) {
             // db_mutli will tell us the newly created value of
             // "_id" when PUT_ID is enabled.
             ret = (sync & PUT_ID) ? to_python(self->ctx, v, TP_PROXY) : Py_None;
@@ -247,7 +247,7 @@ PongoCollection_pop(PongoCollection *self, PyObject *args, PyObject *kwargs)
     }
 
     if (!PyErr_Occurred()) {
-        if (dbcollection_delitem(SELF_CTX_AND_DBCOLL, k, &v, sync) < 0) {
+        if (dbcollection_delitem(SELF_CTX_AND_DBPTR, k, &v, sync) < 0) {
             if (dflt) {
                 Py_INCREF(dflt);
                 ret = dflt;
@@ -301,7 +301,7 @@ PongoCollection_keys(PongoCollection *self)
     kvi.type = 0;
     kvi.ob = PyList_New(0);
     dblock(self->ctx);
-    obj.ptr = dbptr(self->ctx, self->dbcoll);
+    obj.ptr = dbptr(self->ctx, self->dbptr);
     bonsai_foreach(self->ctx, obj.ptr->obj, kvi_helper, &kvi);
     dbunlock(self->ctx);
     return kvi.ob;
@@ -318,7 +318,7 @@ PongoCollection_values(PongoCollection *self)
     kvi.type = 1;
     kvi.ob = PyList_New(0);
     dblock(self->ctx);
-    obj.ptr = dbptr(self->ctx, self->dbcoll);
+    obj.ptr = dbptr(self->ctx, self->dbptr);
     bonsai_foreach(self->ctx, obj.ptr->obj, kvi_helper, &kvi);
     dbunlock(self->ctx);
     return kvi.ob;
@@ -335,7 +335,7 @@ PongoCollection_items(PongoCollection *self)
     kvi.type = 2;
     kvi.ob = PyList_New(0);
     dblock(self->ctx);
-    obj.ptr = dbptr(self->ctx, self->dbcoll);
+    obj.ptr = dbptr(self->ctx, self->dbptr);
     bonsai_foreach(self->ctx, obj.ptr->obj, kvi_helper, &kvi);
     dbunlock(self->ctx);
     return kvi.ob;
@@ -348,7 +348,7 @@ PongoCollection_native(PongoCollection *self)
 {
     PyObject *ret;
     dblock(self->ctx);
-    ret = to_python(SELF_CTX_AND_DBCOLL, 0);
+    ret = to_python(SELF_CTX_AND_DBPTR, 0);
     dbunlock(self->ctx);
     return ret;
 }
@@ -362,7 +362,7 @@ PongoCollection_multi(PongoCollection *self)
     dbtype_t obj;
 
     dblock(self->ctx);
-    obj.ptr = dbptr(self->ctx, self->dbcoll);
+    obj.ptr = dbptr(self->ctx, self->dbptr);
     ret = obj.ptr->type == MultiCollection ? Py_True : Py_False;
     dbunlock(self->ctx);
     Py_INCREF(ret);
@@ -386,7 +386,7 @@ PongoCollection_json(PongoCollection *self, PyObject *args)
         return NULL;
 
     dblock(self->ctx);
-    dict = self->dbcoll;
+    dict = self->dbptr;
     jctx = json_init(self->ctx);
     if (key) {
         if (val) {
@@ -394,7 +394,7 @@ PongoCollection_json(PongoCollection *self, PyObject *args)
             // inserts dict['key'] = json_parse('value')
             k = dbstring_new(self->ctx, key, klen);
             obj = json_parse(jctx, val, vlen);
-            dbcollection_setitem(SELF_CTX_AND_DBCOLL, k, obj, self->ctx->sync);
+            dbcollection_setitem(SELF_CTX_AND_DBPTR, k, obj, self->ctx->sync);
             Py_INCREF(ret);
         } else {
             // 1-arg form is replace dict.items with parsed json
@@ -466,7 +466,7 @@ PongoCollection_search(PongoCollection *self, PyObject *args)
         dbvalue = from_python(self->ctx, value);
         if (!PyErr_Occurred()) {
             dbrslt = dbcollection_new(self->ctx, 0);
-            db_search(SELF_CTX_AND_DBCOLL, dbpath, -1, relop, dbvalue, dbrslt);
+            db_search(SELF_CTX_AND_DBPTR, dbpath, -1, relop, dbvalue, dbrslt);
             // PROXYCHLD means turn the root object into a real dict, but
             // create proxy objects for all children.
             ret = to_python(self->ctx, dbrslt, TP_PROXYCHLD);
@@ -506,7 +506,7 @@ PongoCollection_repr(PyObject *ob)
 {
     PongoCollection *self = (PongoCollection*)ob;
     char buf[32];
-    sprintf(buf, "0x%" PRIx64, self->dbcoll.all);
+    sprintf(buf, "0x%" PRIx64, self->dbptr.all);
     return PyString_FromFormat("PongoCollection(%p, %s)", self->ctx, buf);
 }
 
@@ -529,7 +529,7 @@ PongoCollection_getattr(PyObject *ob, PyObject *name)
     buf = PyString_AsString(name);
     if (buf && !strcmp(buf, "index")) {
         dblock(self->ctx);
-        coll.ptr = dbptr(self->ctx, self->dbcoll);
+        coll.ptr = dbptr(self->ctx, self->dbptr);
         if (self->index.all != coll.ptr->index.all) {
             self->index = coll.ptr->index;
             self->index_ob = to_python(self->ctx, self->index, TP_PROXY);
@@ -549,7 +549,7 @@ PongoCollection_setattr(PyObject *ob, PyObject *name, PyObject *value)
     buf = PyString_AsString(name);
     if (buf && !strcmp(buf, "index")) {
         dblock(self->ctx);
-        coll.ptr = dbptr(self->ctx, self->dbcoll);
+        coll.ptr = dbptr(self->ctx, self->dbptr);
         if (value) {
             coll.ptr->index = from_python(self->ctx, value);
         } else {

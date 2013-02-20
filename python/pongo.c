@@ -312,15 +312,15 @@ from_python(pgctx_t *ctx, PyObject *ob)
     } else if (Py_TYPE(ob) == &PongoList_Type) {
         // Resolve proxy types back to their original dbtype
         PongoList *p = (PongoList*)ob;
-        db = p->dblist;
+        db = p->dbptr;
     } else if (Py_TYPE(ob) == &PongoDict_Type) {
         // Resolve proxy types back to their original dbtype
         PongoDict *p = (PongoDict*)ob;
-        db = p->dbobj;
+        db = p->dbptr;
     } else if (Py_TYPE(ob) == &PongoCollection_Type) {
         // Resolve proxy types back to their original dbtype
         PongoCollection *p = (PongoCollection*)ob;
-        db = p->dbcoll;
+        db = p->dbptr;
     } else if (PyMapping_Check(ob)) {
         length = PyMapping_Length(ob);
         items = PyMapping_Items(ob);
@@ -377,7 +377,7 @@ int
 pongo_check(PongoCollection *data)
 {
     if ((Py_TYPE(data) != &PongoDict_Type && Py_TYPE(data) != &PongoCollection_Type) ||
-        data->dbcoll.all != data->ctx->root->data.all) {
+        data->dbptr.all != data->ctx->root->data.all) {
             PyErr_Format(PyExc_TypeError, "Argument must be a Pongo root object");
             return -1;
     }
@@ -544,7 +544,7 @@ pongo__show(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "O:_info", &data))
         return NULL;
 
-    coll.ptr = dbptr(data->ctx, data->dbcoll);
+    coll.ptr = dbptr(data->ctx, data->dbptr);
     bonsai_show(data->ctx,  coll.ptr->obj, 0);
     Py_RETURN_NONE;
 }

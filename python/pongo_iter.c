@@ -25,24 +25,24 @@ PongoIter_Iter(PyObject *ob)
 
     dblock(po->ctx);
     // Take advantage of the fact that all of the Pongo container types
-    // have the same object layout (PyObject_Head, pgctx_t, dbtype_t)
-    internal.ptr = dbptr(po->ctx, po->dbobj);
+    // have the same object layout of the first few fields.
+    internal.ptr = dbptr(po->ctx, po->dbptr);
     if (internal.ptr->type == List) {
         internal = internal.ptr->list;
         list = dbptr(po->ctx, internal);
-        len = list->len;
+        len = list ? list->len : 0;
     } else if (internal.ptr->type == Object) {
         internal = internal.ptr->obj;
         obj = dbptr(po->ctx, internal);
-        len = obj->len;
+        len = obj ? obj->len : 0;
     } else if (internal.ptr->type == Collection) {
         internal = internal.ptr->obj;
         node = dbptr(po->ctx, internal);
-        len = node->size;
+        len = node ? node->size : 0;
     } else if (internal.ptr->type == MultiCollection) {
         internal = internal.ptr->obj;
         node = dbptr(po->ctx, internal);
-        len = node->size;
+        len = node ? node->size : 0;
     } else {
         goto exitproc;
     }

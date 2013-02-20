@@ -9,57 +9,50 @@
 #include <pongo/pidcache.h>
 #include <pongo/json.h>
 
+#define PongoObject_HEAD \
+    PyObject_HEAD \
+    pgctx_t *ctx; \
+    dbtype_t dbptr; 
+
 
 typedef struct {
-    PyObject_HEAD
-    pgctx_t *ctx;
-    dbtype_t dblist;
+    PongoObject_HEAD
+} PongoPointer;
+
+typedef struct {
+    PongoObject_HEAD
 } PongoList;
 
 typedef struct {
-    PyObject_HEAD
-    pgctx_t *ctx;
-    dbtype_t dbobj;
+    PongoObject_HEAD
 } PongoDict;
 
 typedef struct {
-    PyObject_HEAD
-    pgctx_t *ctx;
-    dbtype_t dbcoll;
+    PongoObject_HEAD
     dbtype_t index;
     PyObject *index_ob;
 } PongoCollection;
 
 typedef struct {
-    PyObject_HEAD
-    pgctx_t *ctx;
-    dbtype_t dbptr;
-} PongoPointer;
-
-typedef struct {
-    PyObject_HEAD
-    pgctx_t *ctx;
-    dbtype_t dbptr;
+    PongoObject_HEAD
     uint32_t pos, len;
     dbtype_t stack[64];
     int depth;
 } PongoIter;
 
-#define SELF_CTX_AND_DBLIST self->ctx, self->dblist
-#define SELF_CTX_AND_DBOBJ self->ctx, self->dbobj
-#define SELF_CTX_AND_DBCOLL self->ctx, self->dbcoll
+#define SELF_CTX_AND_DBPTR self->ctx, self->dbptr
 
+extern PyTypeObject PongoPointer_Type;
 extern PyTypeObject PongoList_Type;
 extern PyTypeObject PongoDict_Type;
 extern PyTypeObject PongoCollection_Type;
-extern PyTypeObject PongoPointer_Type;
 extern PyTypeObject PongoIter_Type;
 extern PyObject *pongo_id;
 
+extern PyObject* PongoPointer_Proxy(pgctx_t *ctx, dbtype_t db);
 extern PyObject* PongoList_Proxy(pgctx_t *ctx, dbtype_t db);
 extern PyObject* PongoDict_Proxy(pgctx_t *ctx, dbtype_t db);
 extern PyObject* PongoCollection_Proxy(pgctx_t *ctx, dbtype_t db);
-extern PyObject* PongoPointer_Proxy(pgctx_t *ctx, dbtype_t db);
 extern PyObject* PongoIter_Iter(PyObject *ob);
 
 #define TP_PROXY	0x0001

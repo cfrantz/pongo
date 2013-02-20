@@ -102,6 +102,10 @@ PongoCollection_contains(PongoCollection *self, PyObject *key)
     return ret;
 }
 
+PyDoc_STRVAR(get_doc,
+"C.get(key, [default, [sep]]) -> item -- Get C[key] if it exists, else default.\n"
+"key may be a string or list of strings.  Get will traverse into child objects\n"
+"to retrieve the requested object");
 static PyObject *
 PongoCollection_get(PongoCollection *self, PyObject *args, PyObject *kwargs)
 {
@@ -151,7 +155,14 @@ PongoCollection_get(PongoCollection *self, PyObject *args, PyObject *kwargs)
     return ret;
 }
 
-
+PyDoc_STRVAR(set_doc,
+"C.set(key, value, [sep, [sync, [fail]]]) -- Insert or modify C[key].\n"
+"Key maybe a string or list of strings.  Set will traverse into child\n"
+"objects to set the value.\n"
+"\n"
+"sync determines whether or not to do a syncrhonize after the set.\n"
+"fail makes the set operation into 'set or fail'.  Trying to set an\n"
+"key that already exits will result in KeyError");
 static PyObject *
 PongoCollection_set(PongoCollection *self, PyObject *args, PyObject *kwargs)
 {
@@ -208,6 +219,8 @@ PongoCollection_set(PongoCollection *self, PyObject *args, PyObject *kwargs)
     return ret;
 }
 
+PyDoc_STRVAR(pop_doc,
+"C.pop(key, [default, [sync]]) -> item -- Get and remove C[key] if it exists.\n");
 static PyObject *
 PongoCollection_pop(PongoCollection *self, PyObject *args, PyObject *kwargs)
 {
@@ -277,6 +290,8 @@ kvi_helper(pgctx_t *ctx, dbtype_t node, void *user)
 }
 
 
+PyDoc_STRVAR(keys_doc,
+"C.keys() -> [key, ...] -- Get the list of keys in the collection.");
 static PyObject *
 PongoCollection_keys(PongoCollection *self)
 {
@@ -292,6 +307,8 @@ PongoCollection_keys(PongoCollection *self)
     return kvi.ob;
 }
 
+PyDoc_STRVAR(values_doc,
+"C.values() -> [value, ...] -- Get the list of values in the collection.");
 static PyObject *
 PongoCollection_values(PongoCollection *self)
 {
@@ -307,6 +324,8 @@ PongoCollection_values(PongoCollection *self)
     return kvi.ob;
 }
 
+PyDoc_STRVAR(items_doc,
+"C.items() -> [(k,v), ...] -- Get the list of items in the collection.");
 static PyObject *
 PongoCollection_items(PongoCollection *self)
 {
@@ -322,6 +341,8 @@ PongoCollection_items(PongoCollection *self)
     return kvi.ob;
 }
 
+PyDoc_STRVAR(native_doc,
+"C.native() -> {...} -- Return a native python dict with the same items as C.");
 static PyObject *
 PongoCollection_native(PongoCollection *self)
 {
@@ -332,6 +353,8 @@ PongoCollection_native(PongoCollection *self)
     return ret;
 }
 
+PyDoc_STRVAR(multi_doc,
+"C.multi() -> bool -- Return whether C is a key-multival collection");
 static PyObject *
 PongoCollection_multi(PongoCollection *self)
 {
@@ -346,6 +369,10 @@ PongoCollection_multi(PongoCollection *self)
     return ret;
 }
 
+PyDoc_STRVAR(json_doc,
+"C.json([key, value]) -- Return or parse JSON string\n"
+"C.json() -> str -- Return a JSON encoded string representing C.\n"
+"C.json(key, value) -- Parse value as a JSON string and assign it to C[key].\n");
 static PyObject *
 PongoCollection_json(PongoCollection *self, PyObject *args)
 {
@@ -389,6 +416,9 @@ PongoCollection_json(PongoCollection *self, PyObject *args)
     return ret;
 }
 
+PyDoc_STRVAR(search_doc,
+"C.search(key, relop, value) -> Collection -- Find all children of C who\n"
+"have child[key] relop value.\n");
 static PyObject *
 PongoCollection_search(PongoCollection *self, PyObject *args)
 {
@@ -448,6 +478,9 @@ PongoCollection_search(PongoCollection *self, PyObject *args)
     return ret;
 }
 
+PyDoc_STRVAR(create_doc,
+"PongoCollection.create([multi]) -- Create a new collection.\n"
+"multi determines whether the new collection is key-value or key-multivalue.");
 static PyObject *
 PongoCollection_create(PyObject *self, PyObject *args)
 {
@@ -554,17 +587,17 @@ static PySequenceMethods pydbdict_as_sequence = {
 };
 
 static PyMethodDef pycoll_methods[] = {
-    {"get",     (PyCFunction)PongoCollection_get,          METH_VARARGS|METH_KEYWORDS, NULL },
-    {"set",     (PyCFunction)PongoCollection_set,          METH_VARARGS|METH_KEYWORDS, NULL },
-    {"pop",     (PyCFunction)PongoCollection_pop,          METH_VARARGS|METH_KEYWORDS, NULL },
-    {"keys",    (PyCFunction)PongoCollection_keys,         METH_NOARGS, NULL },
-    {"values",  (PyCFunction)PongoCollection_values,       METH_NOARGS, NULL },
-    {"items",   (PyCFunction)PongoCollection_items,        METH_NOARGS, NULL },
-    {"native",  (PyCFunction)PongoCollection_native,       METH_NOARGS, NULL },
-    {"multi",   (PyCFunction)PongoCollection_multi,        METH_NOARGS, NULL },
-    {"create",  (PyCFunction)PongoCollection_create,       METH_STATIC|METH_VARARGS, NULL },
-    {"json",    (PyCFunction)PongoCollection_json,         METH_VARARGS, NULL },
-    {"search",  (PyCFunction)PongoCollection_search,       METH_VARARGS, NULL },
+    {"get",     (PyCFunction)PongoCollection_get,          METH_VARARGS|METH_KEYWORDS, get_doc },
+    {"set",     (PyCFunction)PongoCollection_set,          METH_VARARGS|METH_KEYWORDS, set_doc },
+    {"pop",     (PyCFunction)PongoCollection_pop,          METH_VARARGS|METH_KEYWORDS, pop_doc },
+    {"keys",    (PyCFunction)PongoCollection_keys,         METH_NOARGS, keys_doc },
+    {"values",  (PyCFunction)PongoCollection_values,       METH_NOARGS, values_doc },
+    {"items",   (PyCFunction)PongoCollection_items,        METH_NOARGS, items_doc },
+    {"native",  (PyCFunction)PongoCollection_native,       METH_NOARGS, native_doc },
+    {"multi",   (PyCFunction)PongoCollection_multi,        METH_NOARGS, multi_doc },
+    {"create",  (PyCFunction)PongoCollection_create,       METH_STATIC|METH_VARARGS, create_doc },
+    {"json",    (PyCFunction)PongoCollection_json,         METH_VARARGS, json_doc },
+    {"search",  (PyCFunction)PongoCollection_search,       METH_VARARGS, search_doc },
     { NULL, NULL },
 };
 

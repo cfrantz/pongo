@@ -59,6 +59,8 @@ PongoList_SetItem(PongoList *self, Py_ssize_t i, PyObject *v)
     return ret;
 }
 
+PyDoc_STRVAR(append_doc,
+"L.append(value, [sync]) -- Append value to list.");
 static PyObject *
 PongoList_append(PongoList *self, PyObject *args, PyObject *kwargs)
 {
@@ -81,6 +83,8 @@ PongoList_append(PongoList *self, PyObject *args, PyObject *kwargs)
     return ret;
 }
 
+PyDoc_STRVAR(insert_doc,
+"L.insert(index, value, [sync]) -- Insert value into List at position index.");
 static PyObject *
 PongoList_insert(PongoList *self, PyObject *args, PyObject *kwargs)
 {
@@ -108,6 +112,8 @@ PongoList_insert(PongoList *self, PyObject *args, PyObject *kwargs)
     return ret;
 }
 
+PyDoc_STRVAR(remove_doc,
+"L.remove(value, [sync]) -- Remove value from List.");
 static PyObject *
 PongoList_remove(PongoList *self, PyObject *args, PyObject *kwargs)
 {
@@ -133,6 +139,8 @@ PongoList_remove(PongoList *self, PyObject *args, PyObject *kwargs)
     return ret;
 }
 
+PyDoc_STRVAR(pop_doc,
+"L.pop(index, [sync]) -- Remove and return value from List at index.");
 static PyObject *
 PongoList_pop(PongoList *self, PyObject *args, PyObject *kwargs)
 {
@@ -181,6 +189,8 @@ PongoList_contains(PongoList *self, PyObject *elem)
     return ret;
 }
 
+PyDoc_STRVAR(native_doc,
+"L.native() -> list.  Return a native python list containing the same items.");
 static PyObject *
 PongoList_native(PongoList *self)
 {
@@ -191,6 +201,8 @@ PongoList_native(PongoList *self)
     return ret;
 }
 
+PyDoc_STRVAR(create_doc,
+"PongoList.create() -- Create a new PongoList.");
 static PyObject *
 PongoList_create(PyObject *self, PyObject *arg)
 {
@@ -227,12 +239,12 @@ void PongoList_Del(PyObject *ob)
 }
 
 static PyMethodDef pydblist_methods[] = {
-    { "append", (PyCFunction)PongoList_append,       METH_VARARGS|METH_KEYWORDS, NULL },
-    { "insert", (PyCFunction)PongoList_insert,       METH_VARARGS|METH_KEYWORDS, NULL },
-    { "remove", (PyCFunction)PongoList_remove,       METH_VARARGS|METH_KEYWORDS, NULL },
-    { "pop",    (PyCFunction)PongoList_pop,          METH_VARARGS|METH_KEYWORDS, NULL },
-    { "native", (PyCFunction)PongoList_native,       METH_NOARGS, NULL },
-    { "create", (PyCFunction)PongoList_create,       METH_STATIC|METH_O, NULL },
+    { "append", (PyCFunction)PongoList_append,       METH_VARARGS|METH_KEYWORDS, append_doc },
+    { "insert", (PyCFunction)PongoList_insert,       METH_VARARGS|METH_KEYWORDS, insert_doc },
+    { "remove", (PyCFunction)PongoList_remove,       METH_VARARGS|METH_KEYWORDS, remove_doc },
+    { "pop",    (PyCFunction)PongoList_pop,          METH_VARARGS|METH_KEYWORDS, pop_doc },
+    { "native", (PyCFunction)PongoList_native,       METH_NOARGS, native_doc },
+    { "create", (PyCFunction)PongoList_create,       METH_STATIC|METH_O, create_doc },
     { NULL, NULL }
 };
 

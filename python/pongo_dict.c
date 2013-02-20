@@ -91,6 +91,10 @@ PongoDict_contains(PongoDict *self, PyObject *key)
     return ret;
 }
 
+PyDoc_STRVAR(get_doc,
+"D.get(key, [default, [sep]]) -> item -- Get D[key] if it exists, else default.\n"
+"key may be a string or list of strings.  Get will traverse into child objects\n"
+"to retrieve the requested object");
 static PyObject *
 PongoDict_get(PongoDict *self, PyObject *args, PyObject *kwargs)
 {
@@ -140,7 +144,14 @@ PongoDict_get(PongoDict *self, PyObject *args, PyObject *kwargs)
     return ret;
 }
 
-
+PyDoc_STRVAR(set_doc,
+"D.set(key, value, [sep, [sync, [fail]]]) -- Insert or modify D[key].\n"
+"Key maybe a string or list of strings.  Set will traverse into child\n"
+"objects to set the value.\n"
+"\n"
+"sync determines whether or not to do a syncrhonize after the set.\n"
+"fail makes the set operation into 'set or fail'.  Trying to set an\n"
+"key that already exits will result in KeyError");
 static PyObject *
 PongoDict_set(PongoDict *self, PyObject *args, PyObject *kwargs)
 {
@@ -197,6 +208,8 @@ PongoDict_set(PongoDict *self, PyObject *args, PyObject *kwargs)
     return ret;
 }
 
+PyDoc_STRVAR(pop_doc,
+"D.pop(key, [default, [sync]]) -> item -- Get and remove D[key] if it exists.\n");
 static PyObject *
 PongoDict_pop(PongoDict *self, PyObject *args, PyObject *kwargs)
 {
@@ -228,7 +241,8 @@ PongoDict_pop(PongoDict *self, PyObject *args, PyObject *kwargs)
     return ret;
 }
 
-
+PyDoc_STRVAR(keys_doc,
+"D.keys() -> [key, ...] -- Get the list of keys in the dictionary.");
 static PyObject *
 PongoDict_keys(PongoDict *self) {
     dbtype_t db;
@@ -252,6 +266,8 @@ PongoDict_keys(PongoDict *self) {
     return ret;
 }
 
+PyDoc_STRVAR(values_doc,
+"D.values() -> [value, ...] -- Get the list of values in the dictionary.");
 static PyObject *
 PongoDict_values(PongoDict *self)
 {
@@ -276,6 +292,8 @@ PongoDict_values(PongoDict *self)
     return ret;
 }
 
+PyDoc_STRVAR(items_doc,
+"D.items() -> [(k,v), ...] -- Get the list of items in the dictionary.");
 static PyObject *
 PongoDict_items(PongoDict *self) {
     dbtype_t db;
@@ -301,6 +319,8 @@ PongoDict_items(PongoDict *self) {
     return ret;
 }
 
+PyDoc_STRVAR(native_doc,
+"D.native() -> {...} -- Return a native python dict with the same items as D.");
 static PyObject *
 PongoDict_native(PongoDict *self)
 {
@@ -311,6 +331,11 @@ PongoDict_native(PongoDict *self)
     return ret;
 }
 
+PyDoc_STRVAR(json_doc,
+"D.json() -- Return or parse JSON string\n"
+"D.json() -> str -- Return a JSON encoded string representing D.\n"
+"D.json(value) -- Parse value as a JSON string and assign it to D.\n"
+"D.json(key, value) -- Parse value as a JSON string and assign it to D[key].\n");
 static PyObject *
 PongoDict_json(PongoDict *self, PyObject *args)
 {
@@ -354,6 +379,9 @@ PongoDict_json(PongoDict *self, PyObject *args)
     return ret;
 }
 
+PyDoc_STRVAR(search_doc,
+"D.search(key, relop, value) -> Collection -- Find all children of D who\n"
+"have child[key] relop value.\n");
 static PyObject *
 PongoDict_search(PongoDict *self, PyObject *args)
 {
@@ -413,6 +441,8 @@ PongoDict_search(PongoDict *self, PyObject *args)
     return ret;
 }
 
+PyDoc_STRVAR(create_doc,
+"PongoDict.create([multi]) -- Create a new dictionary.");
 static PyObject *
 PongoDict_create(PyObject *self, PyObject *arg)
 {
@@ -468,16 +498,16 @@ static PySequenceMethods pydbdict_as_sequence = {
 };
 
 static PyMethodDef pydbdict_methods[] = {
-    {"get",     (PyCFunction)PongoDict_get,          METH_VARARGS|METH_KEYWORDS, NULL },
-    {"set",     (PyCFunction)PongoDict_set,          METH_VARARGS|METH_KEYWORDS, NULL },
-    {"pop",     (PyCFunction)PongoDict_pop,          METH_VARARGS|METH_KEYWORDS, NULL },
-    {"keys",    (PyCFunction)PongoDict_keys,         METH_NOARGS, NULL },
-    {"values",  (PyCFunction)PongoDict_values,       METH_NOARGS, NULL },
-    {"items",   (PyCFunction)PongoDict_items,        METH_NOARGS, NULL },
-    {"native",  (PyCFunction)PongoDict_native,       METH_NOARGS, NULL },
-    {"create",  (PyCFunction)PongoDict_create,       METH_STATIC|METH_O, NULL },
-    {"json",    (PyCFunction)PongoDict_json,         METH_VARARGS, NULL },
-    {"search",  (PyCFunction)PongoDict_search,       METH_VARARGS, NULL },
+    {"get",     (PyCFunction)PongoDict_get,          METH_VARARGS|METH_KEYWORDS, get_doc },
+    {"set",     (PyCFunction)PongoDict_set,          METH_VARARGS|METH_KEYWORDS, set_doc },
+    {"pop",     (PyCFunction)PongoDict_pop,          METH_VARARGS|METH_KEYWORDS, pop_doc },
+    {"keys",    (PyCFunction)PongoDict_keys,         METH_NOARGS, keys_doc },
+    {"values",  (PyCFunction)PongoDict_values,       METH_NOARGS, values_doc },
+    {"items",   (PyCFunction)PongoDict_items,        METH_NOARGS, items_doc },
+    {"native",  (PyCFunction)PongoDict_native,       METH_NOARGS, native_doc },
+    {"create",  (PyCFunction)PongoDict_create,       METH_STATIC|METH_O, create_doc },
+    {"json",    (PyCFunction)PongoDict_json,         METH_VARARGS, json_doc },
+    {"search",  (PyCFunction)PongoDict_search,       METH_VARARGS, search_doc },
     { NULL, NULL },
 };
 

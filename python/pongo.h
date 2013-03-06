@@ -35,9 +35,12 @@ typedef struct {
 
 typedef struct {
     PongoObject_HEAD
+    dbtag_t tag;
     uint32_t pos, len;
     dbtype_t stack[64];
     int depth;
+    int lhex, rhex;
+    dbtype_t lhdata, rhdata;
 } PongoIter;
 
 #define SELF_CTX_AND_DBPTR self->ctx, self->dbptr

@@ -88,7 +88,7 @@ void *pmem_pool_alloc(mempool_t *pool, uint32_t size)
 
     if (ret) {
         assert((newdesc.e_ofs & 7) == 0);
-        //CJF -- should need this
+        // CJF -- shouldn't need this
         memset(ret, 0, size);
         pb = (poolblock_t*)ret;
         // The first word is the linked list pointer, the second is

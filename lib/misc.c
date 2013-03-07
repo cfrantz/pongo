@@ -24,6 +24,11 @@ int getpid(void)
     return (int)GetCurrentProcessId();
 }
 
+int gettid(void)
+{
+    return (int)GetCurrentThreadId();
+}
+
 int64_t utime_now(void)
 {
     int64_t now;

@@ -167,7 +167,7 @@ to_python(pgctx_t *ctx, dbtype_t db, int flags)
                 pidcache_put(ctx, ob, db);
             } else {
                 if (flags & TP_PROXYCHLD) flags = (flags & ~TP_PROXYCHLD) | TP_PROXY;
-                h.flags = flags;
+                h.flags = flags | (TP_NODEKEY|TP_NODEVAL);
                 h.type = Collection;
                 h.ob = ob = PyDict_New();
                 bonsai_foreach(ctx, dv->obj, to_python_helper, &h);

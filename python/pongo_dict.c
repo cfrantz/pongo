@@ -208,6 +208,46 @@ PongoDict_set(PongoDict *self, PyObject *args, PyObject *kwargs)
     return ret;
 }
 
+
+PyDoc_STRVAR(update_doc,
+"D.update(E, [sync]) -- For each item in E, add/replace that item in D");
+static PyObject *
+PongoDict_update(PongoDict *self, PyObject *args, PyObject *kwargs)
+{
+    PyObject *iter, *items;
+    PyObject *ret = NULL;
+    int length;
+    int sync = self->ctx->sync;
+    char *kwlist[] = {"iter", "sync", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|i:update", kwlist,
+                &iter, &sync))
+        return NULL;
+
+    dblock(self->ctx);
+    if (PyMapping_Check(iter)) {
+        length = PyMapping_Length(iter);
+        items = PyMapping_Items(iter);
+        if (items) {
+            // mapping object implementes "items"
+            if (dbobject_update(SELF_CTX_AND_DBPTR, length, _py_mapping_cb, items, sync) == 0)
+                ret = Py_None;
+            Py_DECREF(items);
+        } else {
+            // mapping object implements iterator protocol
+            // don't have to decref the iterator because it self-decrefs
+            // upon StopIteration
+            PyErr_Clear();
+            items = PyObject_GetIter(iter);
+            if (dbobject_update(SELF_CTX_AND_DBPTR, length, _py_itermapping_cb, items, sync) == 0)
+                ret = Py_None;
+        }
+    }
+    dbunlock(self->ctx);
+    Py_XINCREF(ret);
+    return ret;
+}
+
 PyDoc_STRVAR(pop_doc,
 "D.pop(key, [default, [sync]]) -> item -- Get and remove D[key] if it exists.\n");
 static PyObject *
@@ -501,6 +541,7 @@ static PyMethodDef pydbdict_methods[] = {
     {"get",     (PyCFunction)PongoDict_get,          METH_VARARGS|METH_KEYWORDS, get_doc },
     {"set",     (PyCFunction)PongoDict_set,          METH_VARARGS|METH_KEYWORDS, set_doc },
     {"pop",     (PyCFunction)PongoDict_pop,          METH_VARARGS|METH_KEYWORDS, pop_doc },
+    {"update",  (PyCFunction)PongoDict_update,       METH_VARARGS|METH_KEYWORDS, update_doc },
     {"keys",    (PyCFunction)PongoDict_keys,         METH_NOARGS, keys_doc },
     {"values",  (PyCFunction)PongoDict_values,       METH_NOARGS, values_doc },
     {"items",   (PyCFunction)PongoDict_items,        METH_NOARGS, items_doc },

@@ -66,5 +66,10 @@ extern PyObject *to_python(pgctx_t *ctx, dbtype_t db, int flags);
 extern dbtype_t from_python(pgctx_t *ctx, PyObject *ob);
 extern int pongo_check(PongoCollection *data);
 
+extern int _py_sequence_cb(pgctx_t *ctx, int i, dbtype_t *item, void *user);
+extern int _py_mapping_cb(pgctx_t *ctx, int i, dbtype_t *key, dbtype_t *value, void *user);
+extern int _py_itermapping_cb(pgctx_t *ctx, int i, dbtype_t *key, dbtype_t *value, void *user);
+
+
 // vim: ts=4 sts=4 sw=4 expandtab:
 #endif

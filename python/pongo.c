@@ -212,7 +212,7 @@ to_python(pgctx_t *ctx, dbtype_t db, int flags)
     return ob;
 }
 
-static int sequence_cb(pgctx_t *ctx, int i, dbtype_t *item, void *user)
+int _py_sequence_cb(pgctx_t *ctx, int i, dbtype_t *item, void *user)
 {
     PyObject *seq = (PyObject*)user;
     PyObject *sqitem = PySequence_GetItem(seq, i);
@@ -222,7 +222,7 @@ static int sequence_cb(pgctx_t *ctx, int i, dbtype_t *item, void *user)
     return 0;
 }
 
-static int mapping_cb(pgctx_t *ctx, int i, dbtype_t *key, dbtype_t *value, void *user)
+int _py_mapping_cb(pgctx_t *ctx, int i, dbtype_t *key, dbtype_t *value, void *user)
 {
     PyObject *map = (PyObject*)user;
     PyObject *item = PySequence_GetItem(map, i);
@@ -236,7 +236,7 @@ static int mapping_cb(pgctx_t *ctx, int i, dbtype_t *key, dbtype_t *value, void 
     return 0;
 }
 
-static int itermapping_cb(pgctx_t *ctx, int i, dbtype_t *key, dbtype_t *value, void *user)
+int _py_itermapping_cb(pgctx_t *ctx, int i, dbtype_t *key, dbtype_t *value, void *user)
 {
     PyObject *iter = (PyObject*)user;
     PyObject *item = PyIter_Next(iter);
@@ -327,7 +327,7 @@ from_python(pgctx_t *ctx, PyObject *ob)
         if (items) {
             // mapping object implements "items"
             db = dbobject_new(ctx);
-            dbobject_update(ctx, db, length, mapping_cb, items, NOSYNC);
+            dbobject_update(ctx, db, length, _py_mapping_cb, items, NOSYNC);
             Py_XDECREF(items);
         } else {
             // mapping object implements iterator protocol
@@ -336,12 +336,12 @@ from_python(pgctx_t *ctx, PyObject *ob)
             PyErr_Clear();
             items = PyObject_GetIter(ob);
             db = dbobject_new(ctx);
-            dbobject_update(ctx, db, length, itermapping_cb, items, NOSYNC);
+            dbobject_update(ctx, db, length, _py_itermapping_cb, items, NOSYNC);
         }
     } else if (PySequence_Check(ob)) {
         length = PySequence_Length(ob);
         db = dblist_new(ctx);
-        dblist_extend(ctx, db, length, sequence_cb, ob, NOSYNC);
+        dblist_extend(ctx, db, length, _py_sequence_cb, ob, NOSYNC);
     } else {
         // FIXME: Unknown object type
         PyErr_SetObject(PyExc_TypeError, (PyObject*)Py_TYPE(ob));

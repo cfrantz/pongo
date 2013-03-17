@@ -4,8 +4,6 @@ TODO List:
 Indexes: build alternate bonsai trees for fast object lookups on
 alternate fields.
 
-Common PongoObject header in pongo.h
-
 Unlock the GIL
 
 Thread safety (rcu loser/winer lists)
@@ -14,8 +12,18 @@ Documentation
 
 Test cases/code coverage
 
+YCSB benchmark, other benchmarks
 
 json:select or similar for querying.
+
+Refactor iterators to have lower-level support routines, less code in language bindings for iterators.
+Rework the 'search' function to use an iterator
+Chainable modifyable iterators:
+
+	* obj.iter(KEYS_ONLY)
+	* obj.iter(VALUES_ONLY)
+	* obj.iter().reverse().limit(100)
+	* obj.iter().search("foo.bar.x > 5").limit(10).reverse()
 
 Generic object recreation registry.
 	a) __jsonclass__

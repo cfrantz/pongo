@@ -83,6 +83,30 @@ PongoList_append(PongoList *self, PyObject *args, PyObject *kwargs)
     return ret;
 }
 
+PyDoc_STRVAR(extend_doc,
+"L.extend(iterable, [sync]) --  extend list by appending elements from the iterable.");
+static PyObject *
+PongoList_extend(PongoList *self, PyObject *args, PyObject *kwargs)
+{
+    PyObject *ret = NULL;
+    PyObject *iter;
+    int sync = self->ctx->sync;
+    int length;
+    char *kwlist[] = {"iterable", "sync", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|i:append", kwlist,
+                &iter, &sync))
+        return NULL;
+
+    dblock(self->ctx);
+    length = PySequence_Length(iter);
+    if (dblist_extend(SELF_CTX_AND_DBPTR, length, _py_sequence_cb, iter, sync) == 0) {
+        ret = Py_None;
+    }
+    dbunlock(self->ctx);
+    return ret;
+}
+
 PyDoc_STRVAR(insert_doc,
 "L.insert(index, value, [sync]) -- Insert value into List at position index.");
 static PyObject *
@@ -240,6 +264,7 @@ void PongoList_Del(PyObject *ob)
 
 static PyMethodDef pydblist_methods[] = {
     { "append", (PyCFunction)PongoList_append,       METH_VARARGS|METH_KEYWORDS, append_doc },
+    { "extend", (PyCFunction)PongoList_extend,       METH_VARARGS|METH_KEYWORDS, extend_doc },
     { "insert", (PyCFunction)PongoList_insert,       METH_VARARGS|METH_KEYWORDS, insert_doc },
     { "remove", (PyCFunction)PongoList_remove,       METH_VARARGS|METH_KEYWORDS, remove_doc },
     { "pop",    (PyCFunction)PongoList_pop,          METH_VARARGS|METH_KEYWORDS, pop_doc },
